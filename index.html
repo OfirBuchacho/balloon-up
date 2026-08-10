@@ -1,0 +1,2189 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<title>Balloon Up!</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎈</text></svg>">
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #000; font-family: 'Segoe UI', Arial, sans-serif; }
+
+  /* ---------- HUD ---------- */
+  #scoreboard {
+    position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6;
+    background: rgba(20,20,30,0.6); padding: 8px 22px; border-radius: 14px;
+    color: #fff; font-size: 24px; font-weight: 700;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    backdrop-filter: blur(4px);
+  }
+  #scoreRow { display: flex; gap: 14px; align-items: center; }
+  #scoreRow .turn {
+    text-decoration: underline; text-underline-offset: 5px;
+    filter: brightness(1.35) drop-shadow(0 0 6px currentColor);
+  }
+  #timer { color: #ffd166; font-size: 19px; font-weight: 600; }
+  #timer.low { color: #ff6b6b; }
+  #hudFree {
+    position: fixed; top: 16px; right: 16px; color: #fff; z-index: 6;
+    background: rgba(20,20,30,0.55); padding: 10px 16px; border-radius: 12px;
+    font-size: 18px; backdrop-filter: blur(4px);
+  }
+  #hudFree .big { font-size: 26px; font-weight: 700; }
+  #roundMsg {
+    position: fixed; top: 84px; left: 50%; transform: translateX(-50%); z-index: 6;
+    color: #ffd166; font-size: 28px; font-weight: 800;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.8); display: none; text-align: center;
+  }
+  #divider {
+    position: fixed; left: 50%; top: 0; bottom: 0; width: 3px; z-index: 4;
+    background: rgba(0,0,0,0.85); transform: translateX(-50%);
+  }
+  .crosshair {
+    position: fixed; top: 50%; width: 8px; height: 8px; border-radius: 50%;
+    background: rgba(255,255,255,0.85); z-index: 5; pointer-events: none;
+    transform: translate(-50%,-50%); box-shadow: 0 0 6px rgba(0,0,0,0.6);
+  }
+  .chargeWrap {
+    position: fixed; bottom: 30px; width: 190px; height: 12px; z-index: 5;
+    transform: translateX(-50%); border-radius: 999px; overflow: hidden;
+    background: rgba(20,20,30,0.55); border: 1px solid rgba(255,255,255,0.35);
+    pointer-events: none;
+  }
+  .chargeFill { height: 100%; width: 0%; }
+  .dashInd {
+    position: fixed; bottom: 24px; z-index: 5; transform: translateX(-50%);
+    width: 30px; height: 30px; line-height: 28px; text-align: center;
+    font-size: 15px; font-weight: 800; color: #ffd166;
+    background: rgba(20,20,30,0.55); border: 2px solid #ffd166; border-radius: 50%;
+    pointer-events: none;
+  }
+  .dashInd.cooling { color: #778; border-color: #556; }
+  .playerFrame {
+    position: fixed; top: 0; bottom: 0; width: 50%; z-index: 4;
+    pointer-events: none; box-sizing: border-box; border: 5px solid transparent;
+  }
+  #frame1 { left: 0; }
+  #frame2 { right: 0; }
+  .playerLabel {
+    position: fixed; bottom: 52px; z-index: 5; transform: translateX(-50%);
+    font-size: 18px; font-weight: 800; pointer-events: none; color: #fff;
+    background: rgba(20,20,30,0.55); padding: 4px 16px; border-radius: 999px;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.7);
+  }
+  #label1 { left: 25%; }
+  #label2 { left: 75%; }
+
+  /* ---------- Menus ---------- */
+  .menu {
+    position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: radial-gradient(ellipse at 50% 30%, rgba(45,40,80,0.95), rgba(10,10,20,0.97));
+    color: #fff; overflow-y: auto; padding: 20px 0;
+  }
+  .menu h1 {
+    font-size: 58px; margin: 0; letter-spacing: 3px; font-weight: 900;
+    background: linear-gradient(180deg, #ffd166, #ff6b6b);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    text-shadow: 0 6px 24px rgba(255,107,107,0.25);
+  }
+  .menu .tagline { font-size: 19px; color: #b8b8d0; margin: 6px 0 22px; }
+  .menu h2 { font-size: 40px; margin: 0 0 20px; letter-spacing: 2px; }
+
+  .modeCards { display: flex; gap: 18px; margin-bottom: 24px; }
+  .modeCard {
+    width: 250px; padding: 20px 18px; border-radius: 18px; cursor: pointer;
+    background: rgba(255,255,255,0.05); border: 2px solid #445;
+    transition: all 0.15s; text-align: center;
+  }
+  .modeCard:hover { border-color: #778; transform: translateY(-2px); }
+  .modeCard.selected { border-color: #ffd166; background: rgba(255,209,102,0.1); }
+  .modeCard .icon { font-size: 44px; }
+  .modeCard .name { font-size: 24px; font-weight: 800; margin: 8px 0 6px; }
+  .modeCard .desc { font-size: 14px; color: #aab; line-height: 1.5; }
+
+  .settingRow { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .settingLabel { font-size: 17px; color: #d8d8e8; min-width: 130px; text-align: right; }
+  .pill {
+    font-family: inherit; font-size: 17px; padding: 8px 20px; border-radius: 999px;
+    background: rgba(255,255,255,0.08); color: #d8d8e8; border: 2px solid #556;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .pill:hover { border-color: #99a; }
+  .pill.selected { background: #ffd166; color: #222; border-color: #ffd166; font-weight: 700; }
+
+  .swatch {
+    width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
+    border: 3px solid transparent; transition: transform 0.1s;
+  }
+  .swatch:hover { transform: scale(1.15); }
+  .swatch.selected { border-color: #fff; transform: scale(1.15); }
+  .swatch.taken { opacity: 0.25; cursor: not-allowed; }
+
+  #playBtn {
+    margin-top: 28px; font-family: inherit; font-size: 30px; font-weight: 900;
+    letter-spacing: 4px; padding: 16px 90px; border-radius: 999px; cursor: pointer;
+    color: #1a1626; border: none;
+    background: linear-gradient(180deg, #ffd166, #ff9f43);
+    box-shadow: 0 8px 28px rgba(255,159,67,0.45);
+    transition: transform 0.12s, box-shadow 0.12s;
+  }
+  #playBtn:hover { transform: scale(1.05); box-shadow: 0 10px 34px rgba(255,159,67,0.65); }
+
+  .menuBtn {
+    font-family: inherit; font-size: 22px; font-weight: 700; letter-spacing: 1px;
+    padding: 13px 0; width: 280px; margin-top: 12px; border-radius: 14px;
+    cursor: pointer; border: 2px solid #556; color: #e8e8f4;
+    background: rgba(255,255,255,0.06); transition: all 0.15s;
+  }
+  .menuBtn:hover { border-color: #ffd166; color: #ffd166; }
+  .menuBtn.primary {
+    background: linear-gradient(180deg, #ffd166, #ff9f43);
+    color: #1a1626; border: none;
+  }
+  .menuBtn.primary:hover { transform: scale(1.03); color: #1a1626; }
+
+  #controlsHint { margin-top: 22px; font-size: 14px; color: #889; line-height: 1.8; max-width: 640px; }
+  #controlsHint b { color: #aab; }
+  .lobbyNote { font-size: 18px; color: #b8b8d0; margin: 14px 0 6px; }
+  .lobbyErr { color: #ff6b6b; font-size: 16px; min-height: 22px; margin-top: 6px; }
+  #roomCode {
+    font-size: 66px; font-weight: 900; letter-spacing: 14px; color: #ffd166;
+    margin: 6px 0 12px; text-shadow: 0 4px 20px rgba(255,209,102,0.4);
+  }
+  #codeInput {
+    font-family: inherit; font-size: 42px; font-weight: 900; letter-spacing: 12px;
+    width: 250px; text-align: center; text-transform: uppercase; margin-top: 10px;
+    padding: 10px; border-radius: 14px; border: 3px solid #556; outline: none;
+    background: rgba(255,255,255,0.07); color: #ffd166;
+  }
+  #codeInput:focus { border-color: #ffd166; }
+  #clickToPlay {
+    position: fixed; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center;
+    background: rgba(10,10,20,0.55); cursor: pointer;
+  }
+  .ctpBox {
+    background: rgba(20,20,30,0.92); border: 2px solid #ffd166; border-radius: 18px;
+    padding: 26px 42px; text-align: center; color: #fff; max-width: 460px;
+  }
+  .ctpIcon { font-size: 46px; }
+  .ctpTitle { font-size: 26px; font-weight: 800; color: #ffd166; margin: 8px 0 10px; }
+  .ctpSub { font-size: 16px; color: #c8c8dc; line-height: 1.6; }
+  #netMsg {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 9;
+    background: rgba(20,20,30,0.85); color: #ffd166; font-size: 22px; font-weight: 700;
+    padding: 16px 34px; border-radius: 14px; display: none;
+  }
+  #endText { font-size: 22px; color: #d8d8e8; margin-bottom: 10px; }
+  #endTitle { font-size: 44px; font-weight: 900; margin-bottom: 8px; }
+  .menu.liveMatch {
+    background: rgba(10,10,20,0.55);
+  }
+  .menu.liveMatch .liveWarn {
+    color: #ff9f43; font-size: 17px; font-weight: 700; margin-bottom: 14px;
+  }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- HUD -->
+<div id="scoreboard" class="hidden">
+  <div id="scoreRow">
+    <span id="name1">Player 1</span>
+    <span id="score1">0</span> : <span id="score2">0</span>
+    <span id="name2">Player 2</span>
+  </div>
+  <div id="timer">3:00</div>
+</div>
+<div id="hudFree" class="hidden">
+  <div>Slaps: <span id="hits" class="big">0</span></div>
+  <div>Air time: <span id="airTime" class="big">0.0</span>s</div>
+</div>
+<div id="roundMsg"></div>
+<div id="divider" class="hidden"></div>
+<div id="frame1" class="playerFrame hidden"></div>
+<div id="frame2" class="playerFrame hidden"></div>
+<div id="label1" class="playerLabel hidden">Player 1</div>
+<div id="label2" class="playerLabel hidden">Player 2</div>
+<div id="ch1" class="crosshair hidden"></div>
+<div id="ch2" class="crosshair hidden"></div>
+<div id="chargeWrap1" class="chargeWrap hidden"><div id="chargeFill1" class="chargeFill"></div></div>
+<div id="chargeWrap2" class="chargeWrap hidden"><div id="chargeFill2" class="chargeFill"></div></div>
+<div id="dash1" class="dashInd hidden">⚡</div>
+<div id="dash2" class="dashInd hidden">⚡</div>
+
+<!-- MAIN MENU -->
+<div id="mainMenu" class="menu">
+  <h1>BALLOON UP!</h1>
+  <div class="tagline">Don't let the balloon touch the floor 🎈</div>
+
+  <!-- STEP 1: where do you play -->
+  <div id="homeStep">
+    <div class="modeCards">
+      <div class="modeCard" data-place="local">
+        <div class="icon">🖥️</div>
+        <div class="name">LOCAL</div>
+        <div class="desc">Play on this computer — solo practice, or a split-screen duel with a friend beside you.</div>
+      </div>
+      <div class="modeCard" data-place="online">
+        <div class="icon">🌐</div>
+        <div class="name">ONLINE</div>
+        <div class="desc">Play against a friend on another computer. Create a room or join with a 4-letter code.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2a: local sub-mode -->
+  <div id="localStep" class="hidden">
+    <div class="modeCards">
+      <div class="modeCard selected" data-mode="free">
+        <div class="icon">🎈</div>
+        <div class="name">FREE PLAY</div>
+        <div class="desc">Solo practice in the giant living room. Keep the balloon in the air as long as you can!</div>
+      </div>
+      <div class="modeCard" data-mode="1v1">
+        <div class="icon">🥊</div>
+        <div class="name">1 VS 1</div>
+        <div class="desc">Split-screen duel with alternating hits — after you touch it, your rival MUST hit it next. Double touch = foul!</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2b: online role -->
+  <div id="onlineStep" class="hidden">
+    <div id="connStatus" class="lobbyNote">Connecting to server…</div>
+    <div class="modeCards">
+      <div class="modeCard" id="hostCard">
+        <div class="icon">👑</div>
+        <div class="name">CREATE ROOM</div>
+        <div class="desc">You're the host — you choose the match settings and start the game.</div>
+      </div>
+      <div class="modeCard" id="guestCard">
+        <div class="icon">🔑</div>
+        <div class="name">JOIN ROOM</div>
+        <div class="desc">Enter your friend's code. The host's settings apply to the match.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3: settings (host / local only) -->
+  <div id="settingsStep" class="hidden">
+    <div class="settingRow">
+      <span class="settingLabel">Balloon weight:</span>
+      <button class="pill diffBtn" data-diff="easy">Light 🪶</button>
+      <button class="pill diffBtn selected" data-diff="normal">Normal 🎈</button>
+      <button class="pill diffBtn" data-diff="hard">Heavy 🪨</button>
+    </div>
+    <div class="settingRow" id="timeRow">
+      <span class="settingLabel">Match time:</span>
+      <button class="pill timeBtn selected" data-time="180">3 min</button>
+      <button class="pill timeBtn" data-time="300">5 min</button>
+      <button class="pill timeBtn" data-time="600">10 min</button>
+    </div>
+    <div class="settingRow" id="colorRow1">
+      <span class="settingLabel">Player 1 color:</span>
+    </div>
+    <div class="settingRow" id="colorRow2">
+      <span class="settingLabel">Player 2 color:</span>
+    </div>
+  </div>
+
+  <!-- STEP 3b: guest colour only -->
+  <div id="guestPrepStep" class="hidden">
+    <div class="settingRow" id="colorRowGuest">
+      <span class="settingLabel">Your colour:</span>
+    </div>
+    <div class="lobbyNote">Balloon weight and match time are set by the host.</div>
+  </div>
+
+  <button id="playBtn" class="hidden">▶ PLAY</button>
+  <button class="menuBtn hidden" id="menuBackBtn" style="width:200px; font-size:17px; padding:9px 0">← BACK</button>
+
+  <div id="controlsHint">
+    <b>Controls:</b> Move W A S D | Jump: Space | Dash: Left Shift | Look: Mouse | Slap: hold Left Click to charge, release to hit!<br>
+    <b>Local 1v1 — Player 2:</b> Move: Arrow keys | Jump: Enter | Dash: Right Ctrl | Slap: hold Right Shift
+  </div>
+</div>
+
+<!-- ONLINE LOBBY -->
+<div id="lobbyMenu" class="menu hidden">
+  <h2>🌐 ONLINE 1v1</h2>
+
+  <!-- Host waiting with the code -->
+  <div id="lobbyHost" class="hidden">
+    <div class="lobbyNote">Share this code with your friend:</div>
+    <div id="roomCode">----</div>
+    <button class="menuBtn" id="copyCodeBtn" style="width:200px; font-size:17px; padding:9px 0">📋 COPY CODE</button>
+    <div id="hostStatus" class="lobbyNote">Waiting for a player to join…</div>
+    <button class="menuBtn primary hidden" id="startMatchBtn">START MATCH</button>
+    <button class="menuBtn" id="hostCancelBtn">CANCEL</button>
+  </div>
+
+  <!-- Guest entering a code -->
+  <div id="lobbyGuest" class="hidden">
+    <div class="lobbyNote">Enter your friend's room code:</div>
+    <input id="codeInput" maxlength="4" placeholder="CODE" autocomplete="off">
+    <div id="joinError" class="lobbyErr"></div>
+    <button class="menuBtn primary" id="confirmJoinBtn">JOIN</button>
+    <button class="menuBtn" id="guestCancelBtn">BACK</button>
+  </div>
+
+  <!-- Guest waiting for the host to start -->
+  <div id="lobbyWaiting" class="hidden">
+    <div id="waitCode" class="lobbyNote"></div>
+    <div class="lobbyNote">✅ Connected! Waiting for the host to start the match…</div>
+    <button class="menuBtn" id="waitCancelBtn">LEAVE</button>
+  </div>
+</div>
+
+<!-- PAUSE MENU -->
+<div id="pauseMenu" class="menu hidden">
+  <h2 id="pauseTitle">⏸ PAUSED</h2>
+  <div id="liveWarn" class="liveWarn hidden">⚠️ The match is still running — your rival isn't waiting!</div>
+  <button class="menuBtn primary" id="resumeBtn">RESUME GAME</button>
+  <button class="menuBtn" id="rematchBtn">REMATCH</button>
+  <button class="menuBtn" id="pauseMainBtn">MAIN MENU</button>
+</div>
+
+<!-- END MENU -->
+<div id="endMenu" class="menu hidden">
+  <div id="endTitle">🏆</div>
+  <div id="endText"></div>
+  <button class="menuBtn primary" id="endRematchBtn">REMATCH</button>
+  <button class="menuBtn" id="endMainBtn">MAIN MENU</button>
+</div>
+
+<div id="netMsg"></div>
+<div id="clickToPlay" class="hidden">
+  <div class="ctpBox">
+    <div class="ctpIcon">🖱️</div>
+    <div class="ctpTitle">Click to capture the mouse</div>
+    <div class="ctpSub">Your browser didn't lock the pointer, so the camera feels laggy and off-centre.<br>Click anywhere in the game to fix it.</div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+"use strict";
+
+/* ================= SETTINGS ================= */
+const ROOM = { w: 26, d: 20, h: 10 };
+const BALLOON_R = 0.5;
+const PLAYER = { height: 1.6, radius: 0.35, speed: 5.4, jump: 5.4 };
+const GRAVITY_PLAYER = -14;
+const SLAP_RANGE = 2.7;
+const SLAP_POWER = 6.2;
+const SLAP_COOLDOWN = 0.45;
+const WIN_SCORE = 5;
+const CHARGE_TIME = 1.1;
+const POWER_MIN = 0.55;
+const POWER_MAX = 2.1;
+const DASH_MULT = 1.9;      // speed multiplier while dashing
+const DASH_TIME = 0.6;      // dash duration (s)
+const DASH_CD   = 4.0;      // cooldown between dashes (s)
+
+const DIFFICULTY = {
+  easy:   { gravity: -1.7, drag: 0.50 },
+  normal: { gravity: -2.6, drag: 0.42 },
+  hard:   { gravity: -3.8, drag: 0.32 }
+};
+let balloonGravity = DIFFICULTY.normal.gravity;
+let balloonDrag    = DIFFICULTY.normal.drag;
+let matchTime = 180;
+
+/* Game state: 'menu' | 'playing' | 'paused' | 'ended' */
+let state = 'menu';
+let mode = 'free';           // 'free' | '1v1' | 'online'
+let fallbackMode = false;    // no pointer lock available (e.g. sandboxed preview)
+
+/* Online */
+let socket = null;
+let online = false;          // true while in an online match
+let isHost = false;          // host runs balloon physics
+let myNum = 1;               // 1 or 2 — which player I control
+let roomCode = '';
+let netSendTimer = 0;
+const NET_RATE = 1/20;       // 20Hz
+
+/* Duel = any mode with two players (local split-screen or online) */
+function isDuel() { return mode === '1v1' || mode === 'online'; }
+
+/* ================= SCENE ================= */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a1626);
+scene.fog = new THREE.Fog(0x1a1626, 20, 60);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.setScissorTest(true);
+document.body.appendChild(renderer.domElement);
+
+const camera1 = new THREE.PerspectiveCamera(74, innerWidth/innerHeight, 0.05, 90);
+const camera2 = new THREE.PerspectiveCamera(74, (innerWidth/2)/innerHeight, 0.05, 90);
+
+scene.add(new THREE.AmbientLight(0xffe6cf, 0.22));
+// Warm/cool hemisphere: lamp glow from above, wooden floor bounce from below
+const hemi = new THREE.HemisphereLight(0xffe0b3, 0x5a3d26, 0.5);
+scene.add(hemi);
+const lamp = new THREE.PointLight(0xffc98a, 1.25, 55, 1.3);
+lamp.position.set(0, ROOM.h - 1.2, 0);
+lamp.castShadow = true;
+lamp.shadow.mapSize.set(2048, 2048);
+scene.add(lamp);
+// Cool moonlight spilling in from the window
+const windowLight = new THREE.DirectionalLight(0x9dbfff, 0.5);
+windowLight.position.set(-14, 12, -8);
+scene.add(windowLight);
+// Small warm fill from the TV corner
+const tvGlow = new THREE.PointLight(0x8899ff, 0.35, 14, 1.8);
+tvGlow.position.set(0, 3.4, 8.4);
+scene.add(tvGlow);
+
+/* ================= OBSTACLES ================= */
+const obstacles = [];
+const extraMeshes = [];      // objects present only in Free Play (density scales with player count)
+let extrasEnabled = true;
+
+function addBox(x, y, z, w, h, d, color, opts = {}) {
+  const mat = new THREE.MeshStandardMaterial({
+    color, roughness: opts.roughness ?? 0.85, metalness: opts.metalness ?? 0
+  });
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  mesh.position.set(x, y + h/2, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  if (opts.extra) extraMeshes.push(mesh);
+  if (!opts.decorOnly) {
+    const box = {
+      min: new THREE.Vector3(x - w/2, y, z - d/2),
+      max: new THREE.Vector3(x + w/2, y + h, z + d/2)
+    };
+    if (opts.extra) box.extra = true;
+    obstacles.push(box);
+  }
+  return mesh;
+}
+
+function addLeggedTop(x, z, w, d, topY, slabH, legSize, topColor, legColor, opts = {}) {
+  addBox(x, topY - slabH, z, w, slabH, d, topColor, opts);
+  const lx = w/2 - legSize/2 - 0.1, lz = d/2 - legSize/2 - 0.1;
+  addBox(x - lx, 0, z - lz, legSize, topY - slabH, legSize, legColor, opts);
+  addBox(x + lx, 0, z - lz, legSize, topY - slabH, legSize, legColor, opts);
+  addBox(x - lx, 0, z + lz, legSize, topY - slabH, legSize, legColor, opts);
+  addBox(x + lx, 0, z + lz, legSize, topY - slabH, legSize, legColor, opts);
+}
+
+/* ================= ROOM ================= */
+/* Procedural canvas textures — real-room feel without external files */
+function canvasTexture(w, h, draw, repeatX = 1, repeatY = 1) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeatX, repeatY);
+  tex.anisotropy = 8;
+  return tex;
+}
+
+const woodTex = canvasTexture(512, 512, (ctx, w, h) => {
+  // Parquet planks with grain
+  const plankH = 64;
+  for (let y = 0; y < h; y += plankH) {
+    const shade = 118 + Math.random() * 34;
+    ctx.fillStyle = `rgb(${shade}, ${shade * 0.62 | 0}, ${shade * 0.36 | 0})`;
+    ctx.fillRect(0, y, w, plankH);
+    // grain lines
+    for (let i = 0; i < 22; i++) {
+      ctx.strokeStyle = `rgba(60, 34, 16, ${0.05 + Math.random() * 0.1})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      const gy = y + Math.random() * plankH;
+      ctx.moveTo(0, gy);
+      ctx.bezierCurveTo(w*0.3, gy + (Math.random()-0.5)*6, w*0.7, gy + (Math.random()-0.5)*6, w, gy);
+      ctx.stroke();
+    }
+    // plank seam + offset joints
+    ctx.fillStyle = 'rgba(40, 22, 10, 0.65)';
+    ctx.fillRect(0, y, w, 2);
+    const joint = Math.random() * w;
+    ctx.fillRect(joint, y, 2, plankH);
+  }
+}, 5, 4);
+
+const wallTex = canvasTexture(256, 256, (ctx, w, h) => {
+  // Soft warm plaster with subtle noise
+  ctx.fillStyle = '#cdbfa8';
+  ctx.fillRect(0, 0, w, h);
+  for (let i = 0; i < 2600; i++) {
+    ctx.fillStyle = `rgba(${Math.random() > 0.5 ? '255,250,238' : '120,105,84'}, ${Math.random() * 0.05})`;
+    ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
+  }
+}, 6, 3);
+
+const rugTex = canvasTexture(512, 512, (ctx, w, h) => {
+  // Oriental-style rug rings
+  const cx = w/2, cy = h/2;
+  ctx.fillStyle = '#8f3535';
+  ctx.fillRect(0, 0, w, h);
+  const rings = ['#a94444', '#7c2c2c', '#c8a24f', '#7c2c2c', '#a94444', '#5f2222'];
+  rings.forEach((col, i) => {
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 14 - i;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 235 - i * 38, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+  // Fine speckle for fabric feel
+  for (let i = 0; i < 4200; i++) {
+    ctx.fillStyle = `rgba(30, 8, 8, ${Math.random() * 0.08})`;
+    ctx.fillRect(Math.random() * w, Math.random() * h, 1.6, 1.6);
+  }
+});
+
+const fabricTex = canvasTexture(128, 128, (ctx, w, h) => {
+  // Woven fabric weave for the sofas
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  for (let y = 0; y < h; y += 3) {
+    ctx.fillStyle = `rgba(0, 0, 0, ${y % 6 ? 0.06 : 0.12})`;
+    ctx.fillRect(0, y, w, 1);
+  }
+  for (let x = 0; x < w; x += 3) {
+    ctx.fillStyle = `rgba(0, 0, 0, ${x % 6 ? 0.05 : 0.1})`;
+    ctx.fillRect(x, 0, 1, h);
+  }
+}, 8, 8);
+
+function makeRoom() {
+  const g = new THREE.Group();
+
+  const floorMat = new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.72 });
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.w, ROOM.d), floorMat);
+  floor.rotation.x = -Math.PI/2;
+  floor.receiveShadow = true;
+  g.add(floor);
+
+  const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.95 });
+  const wallGeoWide = new THREE.PlaneGeometry(ROOM.w, ROOM.h);
+  const wallGeoDeep = new THREE.PlaneGeometry(ROOM.d, ROOM.h);
+
+  const back = new THREE.Mesh(wallGeoWide, wallMat);
+  back.position.set(0, ROOM.h/2, -ROOM.d/2); back.receiveShadow = true; g.add(back);
+  const front = new THREE.Mesh(wallGeoWide, wallMat);
+  front.position.set(0, ROOM.h/2, ROOM.d/2); front.rotation.y = Math.PI; front.receiveShadow = true; g.add(front);
+  const left = new THREE.Mesh(wallGeoDeep, wallMat);
+  left.position.set(-ROOM.w/2, ROOM.h/2, 0); left.rotation.y = Math.PI/2; left.receiveShadow = true; g.add(left);
+  const right = new THREE.Mesh(wallGeoDeep, wallMat);
+  right.position.set(ROOM.w/2, ROOM.h/2, 0); right.rotation.y = -Math.PI/2; right.receiveShadow = true; g.add(right);
+
+  const ceil = new THREE.Mesh(
+    new THREE.PlaneGeometry(ROOM.w, ROOM.d),
+    new THREE.MeshStandardMaterial({ color: 0xe8e2d5, roughness: 0.98 })
+  );
+  ceil.rotation.x = Math.PI/2; ceil.position.y = ROOM.h; g.add(ceil);
+
+  // Skirting boards along the walls
+  const skirtMat = new THREE.MeshStandardMaterial({ color: 0xf2ede2, roughness: 0.6 });
+  const sk1 = new THREE.Mesh(new THREE.BoxGeometry(ROOM.w, 0.35, 0.1), skirtMat);
+  sk1.position.set(0, 0.175, -ROOM.d/2 + 0.05); g.add(sk1);
+  const sk2 = sk1.clone(); sk2.position.z = ROOM.d/2 - 0.05; g.add(sk2);
+  const sk3 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.35, ROOM.d), skirtMat);
+  sk3.position.set(-ROOM.w/2 + 0.05, 0.175, 0); g.add(sk3);
+  const sk4 = sk3.clone(); sk4.position.x = ROOM.w/2 - 0.05; g.add(sk4);
+
+  // Window with night sky, moon and curtains
+  const winFrame = new THREE.Mesh(
+    new THREE.BoxGeometry(0.2, 4.2, 5.5),
+    new THREE.MeshStandardMaterial({ color: 0xf5f0e6 })
+  );
+  winFrame.position.set(-ROOM.w/2 + 0.1, 5.2, -3.5); g.add(winFrame);
+  const winGlass = new THREE.Mesh(
+    new THREE.PlaneGeometry(5.2, 3.9),
+    new THREE.MeshBasicMaterial({ color: 0x0b1734 })
+  );
+  winGlass.rotation.y = Math.PI/2;
+  winGlass.position.set(-ROOM.w/2 + 0.22, 5.2, -3.5); g.add(winGlass);
+  const moon = new THREE.Mesh(
+    new THREE.CircleGeometry(0.55, 24),
+    new THREE.MeshBasicMaterial({ color: 0xf4f1de })
+  );
+  moon.rotation.y = Math.PI/2;
+  moon.position.set(-ROOM.w/2 + 0.24, 6.1, -4.6); g.add(moon);
+  // Window cross bars
+  const barMat = new THREE.MeshStandardMaterial({ color: 0xf5f0e6 });
+  const barV = new THREE.Mesh(new THREE.BoxGeometry(0.06, 3.9, 0.12), barMat);
+  barV.position.set(-ROOM.w/2 + 0.22, 5.2, -3.5); g.add(barV);
+  const barH = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.12, 5.2), barMat);
+  barH.position.set(-ROOM.w/2 + 0.22, 5.2, -3.5); g.add(barH);
+  // Curtains
+  const curtMat = new THREE.MeshStandardMaterial({ color: 0x8a4a3a, roughness: 0.9, map: fabricTex });
+  const curtL = new THREE.Mesh(new THREE.BoxGeometry(0.35, 5.2, 1.1), curtMat);
+  curtL.position.set(-ROOM.w/2 + 0.3, 4.9, -6.6); g.add(curtL);
+  const curtR = curtL.clone(); curtR.position.z = -0.4; g.add(curtR);
+
+  // Big patterned rug
+  const rug = new THREE.Mesh(
+    new THREE.CircleGeometry(5.2, 48),
+    new THREE.MeshStandardMaterial({ map: rugTex, roughness: 1 })
+  );
+  rug.rotation.x = -Math.PI/2; rug.position.set(0, 0.004, -1); rug.receiveShadow = true;
+  g.add(rug);
+
+  // Picture frames on the back wall
+  function frame(x, y, w2, h2, artColor) {
+    const f = new THREE.Mesh(
+      new THREE.BoxGeometry(w2 + 0.3, h2 + 0.3, 0.1),
+      new THREE.MeshStandardMaterial({ color: 0x3a2c1c })
+    );
+    f.position.set(x, y, -ROOM.d/2 + 0.08); g.add(f);
+    const art = new THREE.Mesh(
+      new THREE.PlaneGeometry(w2, h2),
+      new THREE.MeshStandardMaterial({ color: artColor, roughness: 0.8 })
+    );
+    art.position.set(x, y, -ROOM.d/2 + 0.14); g.add(art);
+  }
+  frame(-1.5, 6.4, 2.4, 1.7, 0x4a6d8c);
+  frame( 2.2, 6.6, 1.5, 2.1, 0xb08a4f);
+
+  // Potted plant in the far right corner (decor)
+  const pot = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55, 0.42, 0.9, 16),
+    new THREE.MeshStandardMaterial({ color: 0xa8552f, roughness: 0.8 })
+  );
+  pot.position.set(11.8, 0.45, 8.6); pot.castShadow = true; g.add(pot);
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x3e7042, roughness: 0.9 });
+  for (let i = 0; i < 5; i++) {
+    const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.55 + Math.random()*0.25, 10, 8), leafMat);
+    leaf.position.set(11.8 + (Math.random()-0.5)*0.7, 1.5 + Math.random()*0.9, 8.6 + (Math.random()-0.5)*0.7);
+    leaf.castShadow = true;
+    g.add(leaf);
+  }
+
+  // Ceiling lamp shade
+  const lampShade = new THREE.Mesh(
+    new THREE.ConeGeometry(0.9, 0.7, 28, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0xf2d5a0, side: THREE.DoubleSide, emissive: 0x664411 })
+  );
+  lampShade.position.set(0, ROOM.h - 0.9, 0); g.add(lampShade);
+
+  return g;
+}
+scene.add(makeRoom());
+
+/* ================= FURNITURE (symmetric map) ================= */
+function addFabricBox(x, y, z, w, h, d, color) {
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.95, map: fabricTex });
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  mesh.position.set(x, y + h/2, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  obstacles.push({
+    min: new THREE.Vector3(x - w/2, y, z - d/2),
+    max: new THREE.Vector3(x + w/2, y + h, z + d/2)
+  });
+  return mesh;
+}
+// Sofa — right side
+addFabricBox(8.0, 0,   -8.4, 6.5, 1.8, 3.0, 0x4a6d8c);
+addFabricBox(8.0, 1.8, -9.4, 6.5, 1.6, 1.0, 0x3f5d78);
+addFabricBox(4.4, 0,   -8.4, 0.7, 2.6, 3.0, 0x3f5d78);
+addFabricBox(11.6, 0,  -8.4, 0.7, 2.6, 3.0, 0x3f5d78);
+addBox(6.5, 1.8, -8.9, 1.6, 0.8, 1.1, 0xd9a05b, { decorOnly: true });
+addBox(9.5, 1.8, -8.9, 1.6, 0.8, 1.1, 0xa04b3d, { decorOnly: true });
+// Fallen wooden chair (tipped on its side) — natural two-step climb to the sofa
+const CHAIR_WOOD = 0x9a6b3f, CHAIR_DARK = 0x7c5530;
+addBox(12.4, 0, -5.5, 1.6, 0.9, 1.8, CHAIR_WOOD);              // backrest lying flat (low step)
+addBox(12.4, 0, -7.1, 1.6, 1.75, 0.55, CHAIR_WOOD);            // seat standing on its edge (high step)
+addBox(11.95, 0.25, -7.75, 0.16, 0.16, 0.8, CHAIR_DARK, { decorOnly: true });   // legs sticking out
+addBox(12.85, 0.25, -7.75, 0.16, 0.16, 0.8, CHAIR_DARK, { decorOnly: true });
+addBox(11.95, 1.35, -7.75, 0.16, 0.16, 0.8, CHAIR_DARK, { decorOnly: true });
+addBox(12.85, 1.35, -7.75, 0.16, 0.16, 0.8, CHAIR_DARK, { decorOnly: true });
+
+// Couch — left side (mirror)
+addFabricBox(-8.0, 0,   -8.4, 6.5, 1.8, 3.0, 0x8c5a4a);
+addFabricBox(-8.0, 1.8, -9.4, 6.5, 1.6, 1.0, 0x784b3d);
+addFabricBox(-4.4, 0,   -8.4, 0.7, 2.6, 3.0, 0x784b3d);
+addFabricBox(-11.6, 0,  -8.4, 0.7, 2.6, 3.0, 0x784b3d);
+addBox(-6.5, 1.8, -8.9, 1.6, 0.8, 1.1, 0x5a8c6e, { decorOnly: true });
+addBox(-9.5, 1.8, -8.9, 1.6, 0.8, 1.1, 0xd9a05b, { decorOnly: true });
+// Poufs (footstools) — soft two-step climb to the couch
+addFabricBox(-12.4, 0, -5.6, 1.5, 0.9, 1.5, 0xb0743c);         // low pouf
+addFabricBox(-12.4, 0, -7.7, 1.5, 1.75, 1.5, 0x6d8a5a);        // tall pouf
+addBox(-12.4, 1.75, -7.7, 1.6, 0.14, 1.6, 0x5c7a4a, { decorOnly: true });  // cushion overhang
+
+// Giant book helper: cream page block + protruding cover slabs + spine
+function addBook(x, y, z, w, h, d, coverColor) {
+  addBox(x, y, z, w, h, d, 0xf0ead8);                                        // pages (collider)
+  addBox(x, y - 0.01, z, w + 0.14, 0.09, d + 0.1, coverColor, { decorOnly: true });      // bottom cover
+  addBox(x, y + h - 0.08, z, w + 0.14, 0.09, d + 0.1, coverColor, { decorOnly: true });  // top cover
+  addBox(x - w/2 - 0.06, y, z, 0.13, h, d + 0.1, coverColor, { decorOnly: true });       // spine
+}
+
+// Giant coffee table — center, run underneath!
+addLeggedTop(0, -1.5, 6.5, 3.6, 1.9, 0.2, 0.5, 0x6b4226, 0x54331d);
+// Ottoman on the right, giant book stack on the left — steps onto the table
+addFabricBox(4.2, 0, -0.6, 1.6, 0.95, 1.2, 0x8c5a4a);
+addBook(-4.2, 0, -0.6, 1.9, 0.5, 1.4, 0x7a3b8c);       // bottom book
+addBook(-4.3, 0.5, -0.68, 1.7, 0.45, 1.25, 0x2f7d6d);  // top book
+
+// TV cabinet — front wall
+addBox(0, 0, 8.9, 7.0, 1.7, 1.7, 0x3a2e24);
+addBox(0, 1.75, 9.3, 5.2, 3.0, 0.25, 0x111111, { decorOnly: true, roughness: 0.3 });
+obstacles.push({
+  min: new THREE.Vector3(-5.2/2, 1.75, 9.175),
+  max: new THREE.Vector3( 5.2/2, 1.75 + 3.0, ROOM.d/2)
+});
+// Thick books by the TV cabinet — steps up from both sides
+addBook(4.6, 0, 7.6, 2.2, 0.85, 1.5, 0x7a3b8c);
+addBook(-4.6, 0, 7.6, 2.2, 0.85, 1.5, 0x2f7d6d);
+
+// Giant sneakers — proportional to the tiny player, heel is a climbable step (Free Play only)
+function addSneaker(x, z, canvasColor) {
+  const ex = { extra: true };
+  addBox(x, 0, z, 1.1, 0.3, 2.3, 0xf5f2ea, ex);                        // sole
+  addBox(x, 0.3, z + 0.45, 1.0, 0.45, 1.3, canvasColor, ex);           // toe upper
+  addBox(x, 0.3, z - 0.75, 1.0, 0.6, 0.8, canvasColor, ex);            // heel collar
+  addBox(x, 0.56, z + 1.02, 0.95, 0.1, 0.3, 0xffffff, { decorOnly: true, extra: true });   // toe cap
+  addBox(x, 0.63, z + 0.15, 0.9, 0.07, 0.55, 0xffffff, { decorOnly: true, extra: true });  // laces
+}
+addSneaker(8.5, 3.5, 0xc0392b);
+addSneaker(-8.5, 3.5, 0x2f5d8a);
+
+// Upright wooden stools — run under them, climb onto them (Free Play only)
+addLeggedTop(10.5, 0.6, 1.7, 1.7, 1.85, 0.18, 0.28, 0x9a6b3f, 0x7c5530, { extra: true });
+addLeggedTop(-10.5, 0.6, 1.7, 1.7, 1.85, 0.18, 0.28, 0x9a6b3f, 0x7c5530, { extra: true });
+
+// Toy ball (solid)
+const toyBall = new THREE.Mesh(
+  new THREE.SphereGeometry(0.8, 24, 18),
+  new THREE.MeshStandardMaterial({ color: 0xd94f6b, roughness: 0.4 })
+);
+toyBall.position.set(-5.5, 0.8, 4.5);
+toyBall.castShadow = true;
+scene.add(toyBall);
+obstacles.push({
+  min: new THREE.Vector3(-5.5 - 0.7, 0, 4.5 - 0.7),
+  max: new THREE.Vector3(-5.5 + 0.7, 1.5, 4.5 + 0.7)
+});
+
+/* ================= BALLOON ================= */
+const balloonMat = new THREE.MeshStandardMaterial({
+  color: 0xe63946, roughness: 0.25, metalness: 0.05, emissive: 0x330000
+});
+const balloon = new THREE.Mesh(new THREE.SphereGeometry(BALLOON_R, 32, 24), balloonMat);
+balloon.scale.y = 1.12;
+balloon.castShadow = true;
+scene.add(balloon);
+
+const knot = new THREE.Mesh(
+  new THREE.ConeGeometry(0.09, 0.13, 10),
+  new THREE.MeshStandardMaterial({ color: 0xb52734 })
+);
+knot.rotation.x = Math.PI;
+balloon.add(knot);
+knot.position.y = -BALLOON_R - 0.04;
+
+const balloonVel = new THREE.Vector3();
+const balloonAngVel = new THREE.Vector3();
+let lastToucher = 0;
+
+/* Guest-side smoothing: predict locally, then ease toward the host's authoritative position */
+const balloonNet = { target: new THREE.Vector3(), quat: new THREE.Quaternion(), has: false, frozen: false, stamp: 0 };
+let lastTouchTime = 0;   // guards against late duplicate slap packets
+
+function updateBalloonRemote(dt) {
+  if (!balloonNet.has) return;
+  // Predict only while the round is live and packets are fresh (<250ms)
+  const fresh = (performance.now() - balloonNet.stamp) < 250;
+  if (!balloonNet.frozen && fresh) {
+    balloon.position.addScaledVector(balloonVel, dt);
+    balloonNet.target.addScaledVector(balloonVel, dt);
+  }
+  // Correct: ease onto the host's position instead of snapping to it
+  balloon.position.lerp(balloonNet.target, Math.min(1, dt * 9));
+  balloon.quaternion.slerp(balloonNet.quat, Math.min(1, dt * 9));
+
+  // Keep the predicted balloon out of geometry — otherwise it visually sinks into the sofa
+  const r = BALLOON_R;
+  balloon.position.x = Math.max(-ROOM.w/2 + r, Math.min(ROOM.w/2 - r, balloon.position.x));
+  balloon.position.z = Math.max(-ROOM.d/2 + r, Math.min(ROOM.d/2 - r, balloon.position.z));
+  balloon.position.y = Math.max(r*1.12, Math.min(ROOM.h - r*1.12, balloon.position.y));
+  for (const box of obstacles) {
+    if (box.extra && !extrasEnabled) continue;
+    const p = balloon.position;
+    const cx = Math.max(box.min.x, Math.min(p.x, box.max.x));
+    const cy = Math.max(box.min.y, Math.min(p.y, box.max.y));
+    const cz = Math.max(box.min.z, Math.min(p.z, box.max.z));
+    const dx = p.x - cx, dy = p.y - cy, dz = p.z - cz;
+    const dist = Math.hypot(dx, dy, dz);
+    if (dist < r && dist > 0.0001) {
+      const k = (r - dist) / dist;
+      p.x += dx * k; p.y += dy * k; p.z += dz * k;
+    } else if (dist <= 0.0001) {
+      p.y = box.max.y + r;
+    }
+  }
+}
+
+function resetBalloon() {
+  balloon.position.set(0, 5.5, 0.5);
+  balloonVel.set((Math.random()-0.5)*1.2, 0.3, (Math.random()-0.5)*1.2);
+  balloonAngVel.set(0, 0, 0);
+  balloon.quaternion.identity();
+  lastToucher = 0;
+  if (typeof balloonNet !== 'undefined') balloonNet.has = false;
+  if (typeof updateTurnUI === 'function') updateTurnUI();
+}
+resetBalloon();
+
+/* ================= PLAYERS ================= */
+/* Clean stylized human: skin head with eyes, shirt in player color, dark pants,
+   articulated arms & legs (walk swing + slap). Forward is local -Z. */
+function makeBody(color) {
+  const g = new THREE.Group();
+  const shirt = new THREE.MeshStandardMaterial({ color, roughness: 0.55 });
+  g.userData.colorMat = shirt;
+  const skin  = new THREE.MeshStandardMaterial({ color: 0xf2c79a, roughness: 0.65 });
+  const pants = new THREE.MeshStandardMaterial({ color: 0x2e3440, roughness: 0.85 });
+  const shoe  = new THREE.MeshStandardMaterial({ color: 0xf5f2ea, roughness: 0.5 });
+
+  // Legs — pivot at the hip for walk swing
+  function makeLeg(side) {
+    const pivot = new THREE.Group();
+    pivot.position.set(side * 0.11, 0.72, 0);
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.62, 0.18), pants);
+    leg.position.y = -0.31; leg.castShadow = true; pivot.add(leg);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.1, 0.3), shoe);
+    foot.position.set(0, -0.67, -0.05); foot.castShadow = true; pivot.add(foot);
+    g.add(pivot);
+    return pivot;
+  }
+  g.userData.legL = makeLeg(-1);
+  g.userData.legR = makeLeg(1);
+
+  // Torso (shirt)
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.52, 0.24), shirt);
+  torso.position.y = 0.98; torso.castShadow = true; g.add(torso);
+
+  // Head + simple face
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.175, 20, 16), skin);
+  head.position.y = 1.42; head.castShadow = true; g.add(head);
+  // Clean faceless look — hair only
+  // Simple hair cap
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.178, 18, 12, 0, Math.PI*2, 0, Math.PI*0.55), 
+    new THREE.MeshStandardMaterial({ color: 0x3a2a1c, roughness: 0.9 }));
+  hair.position.y = 1.44;
+  g.add(hair);
+
+  // Arms — pivot at the shoulder; sleeve in shirt color, forearm in skin
+  function makeArm(side) {
+    const pivot = new THREE.Group();
+    pivot.position.set(side * 0.27, 1.2, 0);
+    const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.3, 0.15), shirt);
+    sleeve.position.y = -0.15; sleeve.castShadow = true; pivot.add(sleeve);
+    const forearm = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.3, 0.13), skin);
+    forearm.position.y = -0.44; forearm.castShadow = true; pivot.add(forearm);
+    g.add(pivot);
+    return pivot;
+  }
+  g.userData.armL = makeArm(-1);
+  g.userData.armR = makeArm(1);
+
+  scene.add(g);
+  return g;
+}
+
+const p1 = {
+  pos: new THREE.Vector3( 6, 0, 3), vy: 0, onGround: true,
+  yaw: -Math.PI/2, pitch: 0, slapTimer: 0, punchAnim: 0,
+  charging: false, charge: 0, dashTimer: 0, dashCd: 0,
+  body: makeBody(0x4668b5)
+};
+const p2 = {
+  pos: new THREE.Vector3(-6, 0, 3), vy: 0, onGround: true,
+  yaw:  Math.PI/2, pitch: 0, slapTimer: 0, punchAnim: 0,
+  charging: false, charge: 0, dashTimer: 0, dashCd: 0,
+  body: makeBody(0xd97b2f)
+};
+
+function tryDash(pl) {
+  if (pl.dashCd > 0) return;
+  pl.dashTimer = DASH_TIME;
+  pl.dashCd = DASH_CD;
+}
+
+/* ================= INPUT ================= */
+const keys = {};
+const GAME_KEYS = ['KeyW','KeyA','KeyS','KeyD','Space','ShiftLeft','ControlRight',
+                   'ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter','ShiftRight'];
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (GAME_KEYS.includes(e.code)) e.preventDefault();
+  if (state !== 'playing') return;
+  if (e.code === 'ShiftLeft' && !e.repeat) tryDash(online ? myPlayer() : p1);
+  if (mode === '1v1') {
+    if (e.code === 'Enter' && p2.onGround) { p2.vy = PLAYER.jump; p2.onGround = false; }
+    if (e.code === 'ShiftRight' && !e.repeat) startCharge(p2);
+    if (e.code === 'ControlRight' && !e.repeat) tryDash(p2);
+  }
+  if (e.code === 'Escape' && fallbackMode) pauseGame();
+});
+addEventListener('keyup', e => {
+  keys[e.code] = false;
+  if (e.code === 'ShiftRight' && state === 'playing' && mode === '1v1') releaseSlap(p2, null);
+});
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+document.addEventListener('visibilitychange', () => { for (const k in keys) keys[k] = false; });
+
+function myPlayer() { return (online && myNum === 2) ? p2 : p1; }
+function myCamera() { return (online && myNum === 2) ? camera2 : camera1; }
+
+addEventListener('mousemove', e => {
+  if (state !== 'playing') return;
+  const me = myPlayer();
+  // movementX/Y is only reliable while the pointer is locked; without a lock the
+  // browser clamps it at the window edges, which felt like lag and drift.
+  const mx = e.movementX || 0, my = e.movementY || 0;
+  if (!document.pointerLockElement) {
+    if (Math.abs(mx) > 120 || Math.abs(my) > 120) return;   // ignore jumps from re-entering the window
+  }
+  me.yaw   -= mx * 0.0023;
+  me.pitch -= my * 0.0023;
+  me.pitch = Math.max(-1.35, Math.min(1.35, me.pitch));
+});
+addEventListener('mousedown', e => {
+  if (state !== 'playing' || e.button !== 0) return;
+  startCharge(myPlayer());
+});
+addEventListener('mouseup', e => {
+  if (state !== 'playing' || e.button !== 0) return;
+  releaseSlap(myPlayer(), myCamera());
+});
+
+/* ================= SLAP (charge & release) ================= */
+function startCharge(pl) {
+  if (pl.slapTimer > 0 || roundPause > 0 || pl.charging) return;
+  pl.charging = true;
+  pl.charge = 0;
+}
+
+function releaseSlap(pl, cam) {
+  if (!pl.charging) return;
+  // Online guest: the host owns the balloon, so send the slap for the host to apply
+  if (online && !isHost) {
+    const power = POWER_MIN + (POWER_MAX - POWER_MIN) * pl.charge;
+    pl.charging = false; pl.charge = 0;
+    if (roundPause > 0 || pl.slapTimer > 0) return;
+
+    // It's not your turn — refuse locally instead of sending a foul to the host
+    if (lastToucher === myNum) {
+      showNetMsg("Wait — it's your rival's turn!", 900);
+      pl.slapTimer = 0.25;
+      return;
+    }
+
+    const eye = pl.pos.clone(); eye.y += PLAYER.height;
+    const dir = new THREE.Vector3();
+    cam.getWorldDirection(dir);
+    const toBalloon = balloon.position.clone().sub(eye);
+    if (toBalloon.length() > SLAP_RANGE) return;
+    if (toBalloon.normalize().dot(dir) < 0.55) return;
+    pl.slapTimer = SLAP_COOLDOWN;
+    pl.punchAnim = 0.18;
+    lastToucher = myNum;        // optimistic: my turn is over the moment I swing
+    updateTurnUI();
+    socket.emit('event', { t: 'slapReq', power, dx: dir.x, dy: dir.y, dz: dir.z, by: myNum });
+    return;
+  }
+  const power = POWER_MIN + (POWER_MAX - POWER_MIN) * pl.charge;
+  pl.charging = false;
+  pl.charge = 0;
+  if (roundPause > 0) return;
+
+  const eye = pl.pos.clone(); eye.y += PLAYER.height;
+  let dir;
+  if (cam) {
+    dir = new THREE.Vector3();
+    cam.getWorldDirection(dir);
+    const toBalloon = balloon.position.clone().sub(eye);
+    if (toBalloon.length() > SLAP_RANGE) return;
+    if (toBalloon.normalize().dot(dir) < 0.55) return;
+  } else {
+    dir = balloon.position.clone().sub(eye);
+    if (dir.length() > SLAP_RANGE) return;
+    dir.normalize();
+  }
+
+  pl.slapTimer = SLAP_COOLDOWN;
+  const selfId = pl === p1 ? 1 : 2;
+
+  // Alternating-hit rule (1v1): you may not hit twice in a row — that's a foul
+  if (online && isHost && lastToucher === selfId) {
+    showNetMsg("Wait — it's your rival's turn!", 900);
+    pl.slapTimer = 0.25;
+    return;
+  }
+  if (isDuel() && lastToucher === selfId) {
+    pl.punchAnim = 0.18;
+    pointScored(selfId === 1 ? 2 : 1, 'Double touch by Player ' + selfId + '! Point for Player ' + (selfId === 1 ? 2 : 1));
+    return;
+  }
+
+  const impulse = dir.clone().multiplyScalar(SLAP_POWER * 0.75 * power);
+  impulse.y += SLAP_POWER * 0.7 * power;
+  impulse.x += (Math.random()-0.5) * 2.2;
+  impulse.z += (Math.random()-0.5) * 2.2;
+  balloonVel.add(impulse);
+
+  balloonAngVel.x += (Math.random()-0.5) * 6 * power;
+  balloonAngVel.y += (Math.random()-0.5) * 6 * power;
+  balloonAngVel.z += (Math.random()-0.5) * 6 * power;
+
+  lastToucher = selfId;
+  lastTouchTime = performance.now();
+  updateTurnUI();
+  if (online && socket) socket.emit('event', { t: 'slapAnim' });
+  if (mode === 'free') { fpHits++; hitsEl.textContent = fpHits; }
+  pl.punchAnim = 0.18;
+}
+
+/* Host applies a slap requested by the remote guest */
+function applyRemoteSlap(d) {
+  const pl = (d.by === 1) ? p1 : p2;
+  pl.punchAnim = 0.18;
+
+  if (lastToucher === d.by) {
+    // Within 400ms it's almost certainly a late/duplicate packet, not a real second hit
+    if (performance.now() - lastTouchTime < 400) return;
+    pointScored(d.by === 1 ? 2 : 1, 'Double touch by Player ' + d.by + '! Point for Player ' + (d.by === 1 ? 2 : 1));
+    return;
+  }
+
+  const dir = new THREE.Vector3(d.dx, d.dy, d.dz).normalize();
+  const impulse = dir.clone().multiplyScalar(SLAP_POWER * 0.75 * d.power);
+  impulse.y += SLAP_POWER * 0.7 * d.power;
+  impulse.x += (Math.random()-0.5) * 2.2;
+  impulse.z += (Math.random()-0.5) * 2.2;
+  balloonVel.add(impulse);
+  balloonAngVel.x += (Math.random()-0.5) * 6 * d.power;
+  balloonAngVel.y += (Math.random()-0.5) * 6 * d.power;
+  balloonAngVel.z += (Math.random()-0.5) * 6 * d.power;
+  lastToucher = d.by;
+  lastTouchTime = performance.now();
+  updateTurnUI();
+}
+
+/* Turn indicator: glow the name of the player who must hit next */
+function updateTurnUI() {
+  const n1 = document.getElementById('name1');
+  const n2 = document.getElementById('name2');
+  n1.classList.toggle('turn', isDuel() && lastToucher === 2);
+  n2.classList.toggle('turn', isDuel() && lastToucher === 1);
+}
+
+/* ================= UI ELEMENTS ================= */
+const scoreboard = document.getElementById('scoreboard');
+const hudFree = document.getElementById('hudFree');
+const hitsEl = document.getElementById('hits');
+const airTimeEl = document.getElementById('airTime');
+const score1El = document.getElementById('score1');
+const score2El = document.getElementById('score2');
+const roundMsgEl = document.getElementById('roundMsg');
+const timerEl = document.getElementById('timer');
+const divider = document.getElementById('divider');
+const mainMenu = document.getElementById('mainMenu');
+const pauseMenu = document.getElementById('pauseMenu');
+const endMenu = document.getElementById('endMenu');
+const endTitle = document.getElementById('endTitle');
+const endText = document.getElementById('endText');
+
+/* ================= MATCH STATE ================= */
+let score1 = 0, score2 = 0;
+let roundPause = 0;
+let timeLeft = matchTime;
+let suddenDeath = false;
+let fpHits = 0, fpAirTime = 0, fpBest = 0;
+
+function formatTime(t) {
+  const mm = Math.floor(t / 60);
+  const ss = Math.floor(t % 60);
+  return mm + ':' + String(ss).padStart(2, '0');
+}
+
+/* ================= MENU LOGIC ================= */
+/* ---------- Main menu navigation: home -> place -> settings -> play ---------- */
+let menuStep = 'home';        // 'home' | 'local' | 'online' | 'hostSetup' | 'guestSetup'
+let onlineRole = null;        // 'host' | 'guest'
+
+const homeStep = document.getElementById('homeStep');
+const localStep = document.getElementById('localStep');
+const onlineStep = document.getElementById('onlineStep');
+const settingsStep = document.getElementById('settingsStep');
+const guestPrepStep = document.getElementById('guestPrepStep');
+const playBtn = document.getElementById('playBtn');
+const menuBackBtn = document.getElementById('menuBackBtn');
+
+function showMenuStep(step) {
+  menuStep = step;
+  [homeStep, localStep, onlineStep, settingsStep, guestPrepStep].forEach(el => el.classList.add('hidden'));
+  playBtn.classList.add('hidden');
+  menuBackBtn.classList.toggle('hidden', step === 'home');
+
+  if (step === 'home') {
+    homeStep.classList.remove('hidden');
+  } else if (step === 'local') {
+    localStep.classList.remove('hidden');
+    settingsStep.classList.remove('hidden');
+    playBtn.classList.remove('hidden');
+    playBtn.textContent = '▶ PLAY';
+    document.getElementById('timeRow').classList.toggle('hidden', mode === 'free');
+    document.getElementById('colorRow2').classList.toggle('hidden', mode === 'free');
+  } else if (step === 'online') {
+    onlineStep.classList.remove('hidden');
+    connectSocket();
+  } else if (step === 'hostSetup') {
+    settingsStep.classList.remove('hidden');
+    document.getElementById('timeRow').classList.remove('hidden');
+    document.getElementById('colorRow2').classList.remove('hidden');
+    playBtn.classList.remove('hidden');
+    playBtn.textContent = '▶ CREATE ROOM';
+  } else if (step === 'guestSetup') {
+    guestPrepStep.classList.remove('hidden');
+    playBtn.classList.remove('hidden');
+    playBtn.textContent = '▶ ENTER CODE';
+  }
+}
+
+menuBackBtn.onclick = () => {
+  if (menuStep === 'local' || menuStep === 'online') showMenuStep('home');
+  else showMenuStep('online');
+};
+
+/* Step 1: LOCAL or ONLINE */
+document.querySelectorAll('[data-place]').forEach(card => {
+  card.addEventListener('click', () => {
+    if (card.dataset.place === 'local') {
+      mode = 'free';
+      online = false;
+      document.querySelectorAll('[data-mode]').forEach(c => c.classList.remove('selected'));
+      document.querySelector('[data-mode="free"]').classList.add('selected');
+      showMenuStep('local');
+    } else {
+      mode = 'online';
+      showMenuStep('online');
+    }
+    updateAspect();
+  });
+});
+
+/* Step 2a: local sub-mode */
+document.querySelectorAll('[data-mode]').forEach(card => {
+  card.addEventListener('click', () => {
+    document.querySelectorAll('[data-mode]').forEach(c => c.classList.remove('selected'));
+    card.classList.add('selected');
+    mode = card.dataset.mode;
+    document.getElementById('timeRow').classList.toggle('hidden', mode === 'free');
+    document.getElementById('colorRow2').classList.toggle('hidden', mode === 'free');
+    updateAspect();
+  });
+});
+
+/* Step 2b: online role */
+document.getElementById('hostCard').addEventListener('click', () => {
+  if (!socket || !socket.connected) { connStatus.textContent = '⚠️ Not connected to the server yet'; return; }
+  onlineRole = 'host';
+  showMenuStep('hostSetup');
+});
+document.getElementById('guestCard').addEventListener('click', () => {
+  if (!socket || !socket.connected) { connStatus.textContent = '⚠️ Not connected to the server yet'; return; }
+  onlineRole = 'guest';
+  showMenuStep('guestSetup');
+});
+
+document.querySelectorAll('.diffBtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.diffBtn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    const d = DIFFICULTY[btn.dataset.diff];
+    balloonGravity = d.gravity;
+    balloonDrag    = d.drag;
+  });
+});
+
+document.querySelectorAll('.timeBtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.timeBtn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    matchTime = parseInt(btn.dataset.time, 10);
+  });
+});
+
+/* Colors */
+const PALETTE = [
+  { name: 'Blue',   hex: 0x4668b5, css: '#4668b5' },
+  { name: 'Orange', hex: 0xd97b2f, css: '#d97b2f' },
+  { name: 'Green',  hex: 0x3f9d5c, css: '#3f9d5c' },
+  { name: 'Red',    hex: 0xc0392b, css: '#c0392b' },
+  { name: 'Purple', hex: 0x8c4fb0, css: '#8c4fb0' },
+  { name: 'Teal',   hex: 0x2f8d8d, css: '#2f8d8d' },
+  { name: 'Pink',   hex: 0xd45d9e, css: '#d45d9e' },
+  { name: 'Yellow', hex: 0xd9b13a, css: '#d9b13a' }
+];
+const playerColorIdx = [0, 1];
+
+function applyColors() {
+  [p1, p2].forEach((pl, i) => {
+    const c = PALETTE[playerColorIdx[i]];
+    pl.body.userData.colorMat.color.setHex(c.hex);
+    document.getElementById('frame' + (i+1)).style.borderColor = c.css;
+    document.getElementById('label' + (i+1)).style.color = c.css;
+    document.getElementById('name' + (i+1)).style.color = c.css;
+    document.getElementById('chargeFill' + (i+1)).style.background = c.css;
+  });
+  [1, 2].forEach(pn => {
+    document.querySelectorAll('#colorRow' + pn + ' .swatch').forEach((sw, idx) => {
+      sw.classList.toggle('selected', playerColorIdx[pn-1] === idx);
+      sw.classList.toggle('taken', playerColorIdx[pn === 1 ? 1 : 0] === idx);
+    });
+  });
+}
+
+[1, 2].forEach(pn => {
+  const row = document.getElementById('colorRow' + pn);
+  if (!row) return;
+  PALETTE.forEach((c, idx) => {
+    const sw = document.createElement('div');
+    sw.className = 'swatch';
+    sw.style.background = c.css;
+    sw.title = c.name;
+    sw.addEventListener('click', () => {
+      if (playerColorIdx[pn === 1 ? 1 : 0] === idx) return;
+      playerColorIdx[pn-1] = idx;
+      applyColors();
+    });
+    row.appendChild(sw);
+  });
+});
+// Guest colour picker (online guest sets only their own colour = player 2)
+(function buildGuestPalette() {
+  const row = document.getElementById('colorRowGuest');
+  PALETTE.forEach((c, idx) => {
+    const sw = document.createElement('div');
+    sw.className = 'swatch';
+    sw.style.background = c.css;
+    sw.title = c.name;
+    sw.dataset.idx = idx;
+    sw.addEventListener('click', () => {
+      playerColorIdx[1] = idx;
+      applyColors();
+      row.querySelectorAll('.swatch').forEach(o => o.classList.toggle('selected', +o.dataset.idx === idx));
+    });
+    row.appendChild(sw);
+  });
+  row.querySelectorAll('.swatch').forEach(o => o.classList.toggle('selected', +o.dataset.idx === playerColorIdx[1]));
+})();
+
+applyColors();
+// Start on the home step (LOCAL / ONLINE)
+document.getElementById('timeRow').classList.add('hidden');
+document.getElementById('colorRow2').classList.add('hidden');
+showMenuStep('home');
+
+/* ================= GAME FLOW ================= */
+function setHudVisible(on) {
+  const duel = isDuel();
+  const split = mode === '1v1';        // split-screen chrome only for local duel
+  scoreboard.classList.toggle('hidden', !on || !duel);
+  hudFree.classList.toggle('hidden', !on || duel);
+  divider.classList.toggle('hidden', !on || !split);
+  document.getElementById('frame1').classList.toggle('hidden', !on || !split);
+  document.getElementById('frame2').classList.toggle('hidden', !on || !split);
+  document.getElementById('label1').classList.toggle('hidden', !on || !split);
+  document.getElementById('label2').classList.toggle('hidden', !on || !split);
+  document.getElementById('ch2').classList.toggle('hidden', !on || !split);
+  document.getElementById('chargeWrap2').classList.toggle('hidden', !on || !split);
+  document.getElementById('ch1').classList.toggle('hidden', !on);
+  document.getElementById('chargeWrap1').classList.toggle('hidden', !on);
+  document.getElementById('dash1').classList.toggle('hidden', !on);
+  document.getElementById('dash2').classList.toggle('hidden', !on || !split);
+  // Crosshair / charge bar sit on the left half only in local split-screen
+  document.getElementById('ch1').style.left = split ? '25%' : '50%';
+  document.getElementById('chargeWrap1').style.left = split ? '25%' : '50%';
+  document.getElementById('dash1').style.left = split ? 'calc(25% + 118px)' : 'calc(50% + 118px)';
+  document.getElementById('dash2').style.left = 'calc(75% + 118px)';
+}
+
+function requestLock() {
+  try {
+    const p = renderer.domElement.requestPointerLock();
+    if (p && p.catch) p.catch(() => {});
+  } catch (err) {}
+  setTimeout(() => {
+    if (document.pointerLockElement !== renderer.domElement && state === 'starting') {
+      fallbackMode = true;
+      beginPlaying();
+      // The browser refused to capture the mouse (window not focused, incognito, etc.).
+      // Say so, and let a click on the canvas capture it properly.
+      showClickToPlay();
+    }
+  }, 350);
+}
+
+/* Overlay shown when the mouse isn't captured — a click fixes the laggy/offset camera */
+const clickToPlay = document.getElementById('clickToPlay');
+clickToPlay.addEventListener('mousedown', () => {
+  try {
+    const p = renderer.domElement.requestPointerLock();
+    if (p && p.catch) p.catch(() => {});
+  } catch (err) {}
+  hideClickToPlay();
+});
+
+function showClickToPlay() {
+  clickToPlay.classList.remove('hidden');
+}
+function hideClickToPlay() {
+  clickToPlay.classList.add('hidden');
+}
+
+/* Clicking the canvas while playing (re)captures the mouse */
+renderer.domElement.addEventListener('mousedown', () => {
+  if ((state === 'playing' || state === 'starting') && !document.pointerLockElement) {
+    try {
+      const p = renderer.domElement.requestPointerLock();
+      if (p && p.catch) p.catch(() => {});
+    } catch (err) {}
+  }
+});
+
+function beginPlaying() {
+  state = 'playing';
+  mainMenu.classList.add('hidden');
+  pauseMenu.classList.add('hidden');
+  endMenu.classList.add('hidden');
+  setHudVisible(true);
+}
+
+function pauseGame() {
+  if (state !== 'playing') return;
+  state = 'paused';
+  hideClickToPlay();
+  // Online matches never freeze — the clock and the balloon keep running for both
+  // players, exactly like modern multiplayer games. Only the local HUD steps aside.
+  if (!online) setHudVisible(false);
+  syncPauseMenuButtons();
+  pauseMenu.classList.remove('hidden');
+}
+
+function resumeGame() {
+  state = 'starting';
+  pauseMenu.classList.add('hidden');
+  if (fallbackMode) beginPlaying();
+  else requestLock();
+}
+
+/* Online: REMATCH would desync the two clients mid-match, so it's host-and-local only */
+function syncPauseMenuButtons() {
+  document.getElementById('rematchBtn').classList.toggle('hidden', online);
+  document.getElementById('liveWarn').classList.toggle('hidden', !online);
+  document.getElementById('pauseTitle').textContent = online ? '⏸ MENU' : '⏸ PAUSED';
+  pauseMenu.classList.toggle('liveMatch', online);
+}
+
+function startNewMatch() {
+  score1 = 0; score2 = 0;
+  score1El.textContent = '0';
+  score2El.textContent = '0';
+  timeLeft = matchTime;
+  suddenDeath = false;
+  timerEl.textContent = formatTime(matchTime);
+  timerEl.classList.remove('low');
+  fpHits = 0; fpAirTime = 0;
+  hitsEl.textContent = '0';
+  airTimeEl.textContent = '0.0';
+  roundPause = 0;
+  resetPositions();
+  roundMsgEl.style.display = 'none';
+}
+
+function resetPositions() {
+  p1.pos.set( mode === 'free' ? 0 : 6, 0, 4.5); p1.vy = 0; p1.charging = false; p1.charge = 0; p1.dashTimer = 0; p1.dashCd = 0;
+  p2.pos.set(-6, 0, 3); p2.vy = 0; p2.charging = false; p2.charge = 0; p2.dashTimer = 0; p2.dashCd = 0;
+  resetBalloon();
+  roundMsgEl.style.display = 'none';
+}
+
+function endGame(titleText, bodyText) {
+  state = 'ended';
+  setHudVisible(false);
+  hideClickToPlay();
+  if (document.pointerLockElement) document.exitPointerLock();
+  endTitle.textContent = titleText;
+  endText.innerHTML = bodyText;
+  endMenu.classList.remove('hidden');
+}
+
+/* Buttons */
+document.getElementById('playBtn').addEventListener('click', () => {
+  if (menuStep === 'hostSetup') { doCreateRoom(); return; }
+  if (menuStep === 'guestSetup') { openGuestJoin(); return; }
+  online = false;
+  state = 'starting';
+  p2.body.visible = (mode === '1v1');
+  // Obstacle density: full map in Free Play, leaner map in 1v1 (more will return for team modes)
+  extrasEnabled = (mode === 'free');
+  extraMeshes.forEach(m => m.visible = extrasEnabled);
+  startNewMatch();
+  mainMenu.classList.add('hidden');
+  if (fallbackMode) beginPlaying();
+  else requestLock();
+});
+document.getElementById('resumeBtn').addEventListener('click', resumeGame);
+document.getElementById('rematchBtn').addEventListener('click', () => {
+  startNewMatch();
+  resumeGame();
+});
+document.getElementById('pauseMainBtn').addEventListener('click', () => {
+  state = 'menu';
+  pauseMenu.classList.add('hidden');
+  setHudVisible(false);
+  mainMenu.classList.remove('hidden');
+});
+document.getElementById('endRematchBtn').addEventListener('click', () => {
+  state = 'starting';
+  startNewMatch();
+  endMenu.classList.add('hidden');
+  if (fallbackMode) beginPlaying();
+  else requestLock();
+});
+document.getElementById('endMainBtn').addEventListener('click', () => {
+  state = 'menu';
+  endMenu.classList.add('hidden');
+  mainMenu.classList.remove('hidden');
+});
+
+/* Pointer lock transitions */
+document.addEventListener('pointerlockchange', () => {
+  const locked = (document.pointerLockElement === renderer.domElement);
+  if (locked) {
+    fallbackMode = false;
+    hideClickToPlay();
+    if (state === 'starting') beginPlaying();
+  } else {
+    // Esc pressed during play -> pause menu
+    if (state === 'playing' && !fallbackMode) pauseGame();
+  }
+});
+
+/* ================= ONLINE ================= */
+const lobbyMenu = document.getElementById('lobbyMenu');
+const lobbyHost = document.getElementById('lobbyHost');
+const lobbyGuest = document.getElementById('lobbyGuest');
+const lobbyWaiting = document.getElementById('lobbyWaiting');
+const connStatus = document.getElementById('connStatus');
+const roomCodeEl = document.getElementById('roomCode');
+const hostStatus = document.getElementById('hostStatus');
+const startMatchBtn = document.getElementById('startMatchBtn');
+const codeInput = document.getElementById('codeInput');
+const joinError = document.getElementById('joinError');
+const netMsg = document.getElementById('netMsg');
+
+function showLobbyStep(el) {
+  [lobbyHost, lobbyGuest, lobbyWaiting].forEach(s => s.classList.add('hidden'));
+  el.classList.remove('hidden');
+}
+
+function showNetMsg(text, ms) {
+  netMsg.textContent = text;
+  netMsg.style.display = 'block';
+  if (ms) setTimeout(() => { netMsg.style.display = 'none'; }, ms);
+}
+
+function connectSocket() {
+  if (socket) return;
+  if (typeof io === 'undefined') {
+    connStatus.textContent = '⚠️ Server not reachable — open the game via the server address (http://localhost:3000)';
+    return;
+  }
+  socket = io();
+  socket.on('connect', () => { connStatus.textContent = '✅ Connected to server'; });
+  socket.on('disconnect', () => {
+    connStatus.textContent = '⚠️ Disconnected from server';
+    if (online && state === 'playing') {
+      showNetMsg('Connection lost', 0);
+      endGame('🔌', 'Connection to the server was lost.');
+    }
+  });
+
+  socket.on('roomUpdate', d => {
+    if (isHost && d.players.length === 2) {
+      hostStatus.textContent = '✅ A player joined! Ready when you are.';
+      startMatchBtn.classList.remove('hidden');
+    }
+  });
+
+  socket.on('matchStarted', d => {
+    if (d && d.settings) applyRemoteSettings(d.settings);
+    startOnlineMatch();
+  });
+
+  socket.on('peerLeft', () => {
+    if (online && state === 'playing') {
+      endGame('👋', 'Your opponent left the match.');
+    } else if (isHost) {
+      hostStatus.textContent = 'Waiting for a player to join…';
+      startMatchBtn.classList.add('hidden');
+    }
+  });
+
+  /* Remote player transform */
+  socket.on('state', d => {
+    const rp = (myNum === 1) ? p2 : p1;
+    rp.netTarget = d;
+  });
+
+  /* Balloon from host — stored as a target, then smoothly corrected (see updateBalloonRemote) */
+  socket.on('balloon', d => {
+    if (isHost) return;
+    balloonNet.target.set(d.px, d.py, d.pz);
+    balloonNet.quat.set(d.qx, d.qy, d.qz, d.qw);
+    balloonVel.set(d.vx, d.vy, d.vz);           // used for local prediction between updates
+    balloonNet.has = true;
+    balloonNet.frozen = !!d.f;                  // host paused the round — stop predicting
+    balloonNet.stamp = performance.now();
+    // Host is authoritative about the round pause, so the guest can never get stuck
+    roundPause = d.rp || 0;
+    if (roundPause <= 0) roundMsgEl.style.display = 'none';
+    // A big gap means a serve/teleport — snap instead of gliding across the room
+    if (balloon.position.distanceTo(balloonNet.target) > 3.5) {
+      balloon.position.copy(balloonNet.target);
+      balloon.quaternion.copy(balloonNet.quat);
+    }
+    lastToucher = d.lt;
+    updateTurnUI();
+  });
+
+  /* Game events */
+  socket.on('event', d => {
+    if (d.t === 'slapAnim') {
+      const rp = (myNum === 1) ? p2 : p1;
+      rp.punchAnim = 0.18;
+    } else if (d.t === 'slapReq' && isHost) {
+      applyRemoteSlap(d);
+    } else if (d.t === 'guestColor' && isHost) {
+      playerColorIdx[1] = d.idx;
+      applyColors();
+    } else if (d.t === 'score') {
+      score1 = d.s1; score2 = d.s2;
+      score1El.textContent = score1;
+      score2El.textContent = score2;
+      roundMsgEl.textContent = d.msg;
+      roundMsgEl.style.display = 'block';
+      roundPause = 1.6;
+    } else if (d.t === 'serve') {
+      roundPause = 0;
+      roundMsgEl.style.display = 'none';
+      resetPositions();
+    } else if (d.t === 'timer') {
+      timeLeft = d.timeLeft;
+      suddenDeath = d.sd;
+      timerEl.textContent = suddenDeath ? '⚡' : formatTime(timeLeft);
+      timerEl.classList.toggle('low', !suddenDeath && timeLeft <= 30);
+      if (d.msg) {
+        roundMsgEl.textContent = d.msg;
+        roundMsgEl.style.display = 'block';
+      }
+    } else if (d.t === 'end') {
+      endGame(d.title, d.body);
+    }
+  });
+}
+
+function currentSettings() {
+  const diffKey = document.querySelector('.diffBtn.selected').dataset.diff;
+  return {
+    diff: diffKey,
+    time: matchTime,
+    hostColor: playerColorIdx[0],
+    guestColor: playerColorIdx[1]
+  };
+}
+
+let applyRemoteSettings = function (s) {
+  const d = DIFFICULTY[s.diff] || DIFFICULTY.normal;
+  balloonGravity = d.gravity;
+  balloonDrag = d.drag;
+  matchTime = s.time || 180;
+  playerColorIdx[0] = s.hostColor ?? 0;
+  playerColorIdx[1] = s.guestColor ?? 1;
+  applyColors();
+};
+
+function backToMenu() {
+  lobbyMenu.classList.add('hidden');
+  mainMenu.classList.remove('hidden');
+  isHost = false;
+  showMenuStep('online');
+}
+
+function showLobby(step) {
+  mainMenu.classList.add('hidden');
+  lobbyMenu.classList.remove('hidden');
+  showLobbyStep(step);
+}
+
+document.getElementById('hostCancelBtn').onclick = backToMenu;
+document.getElementById('waitCancelBtn').onclick = backToMenu;
+document.getElementById('guestCancelBtn').onclick = backToMenu;
+
+function doCreateRoom() {
+  if (!socket || !socket.connected) { connStatus.textContent = '⚠️ Not connected to the server yet'; return; }
+  socket.emit('createRoom', { name: 'Host', color: playerColorIdx[0], settings: currentSettings() }, res => {
+    if (!res.ok) { connStatus.textContent = res.error; return; }
+    isHost = true;
+    myNum = 1;
+    roomCode = res.code;
+    roomCodeEl.textContent = res.code;
+    hostStatus.textContent = 'Waiting for a player to join…';
+    startMatchBtn.classList.add('hidden');
+    showLobby(lobbyHost);
+  });
+}
+
+function openGuestJoin() {
+  joinError.textContent = '';
+  codeInput.value = '';
+  showLobby(lobbyGuest);
+  setTimeout(() => codeInput.focus(), 100);
+}
+
+document.getElementById('copyCodeBtn').onclick = () => {
+  navigator.clipboard?.writeText(roomCode);
+  document.getElementById('copyCodeBtn').textContent = '✅ COPIED!';
+  setTimeout(() => { document.getElementById('copyCodeBtn').textContent = '📋 COPY CODE'; }, 1500);
+};
+
+function doJoin() {
+  const code = codeInput.value.toUpperCase().trim();
+  if (code.length !== 4) { joinError.textContent = 'Enter the 4-letter code'; return; }
+  const myColor = playerColorIdx[1];
+  socket.emit('joinRoom', { code, name: 'Guest', color: myColor }, res => {
+    if (!res.ok) { joinError.textContent = res.error; return; }
+    isHost = false;
+    myNum = 2;
+    roomCode = res.code;
+    if (res.settings) applyRemoteSettings(res.settings);
+    playerColorIdx[1] = myColor;      // keep my chosen colour
+    applyColors();
+    socket.emit('event', { t: 'guestColor', idx: myColor });
+    document.getElementById('waitCode').textContent = 'Room ' + res.code;
+    showLobbyStep(lobbyWaiting);
+  });
+}
+document.getElementById('confirmJoinBtn').onclick = doJoin;
+codeInput.addEventListener('keydown', e => { if (e.code === 'Enter') doJoin(); });
+
+startMatchBtn.onclick = () => {
+  socket.emit('updateSettings', currentSettings());
+  socket.emit('startMatch');
+};
+
+/* Guest keeps its own colour when the host's settings arrive */
+const _applyRemoteSettings = applyRemoteSettings;
+applyRemoteSettings = function (sv) {
+  const mine = playerColorIdx[1];
+  _applyRemoteSettings(sv);
+  if (!isHost) { playerColorIdx[1] = mine; applyColors(); }
+};
+
+function startOnlineMatch() {
+  online = true;
+  mode = 'online';
+  state = 'starting';
+  lobbyMenu.classList.add('hidden');
+  p2.body.visible = true;
+  extrasEnabled = false;           // lean map, same as local 1v1
+  extraMeshes.forEach(m => m.visible = false);
+  updateAspect();
+  startNewMatch();
+  if (fallbackMode) beginPlaying();
+  else requestLock();
+}
+
+/* Send my transform + receive/interpolate the opponent's */
+function netTick(dt) {
+  if (!online || !socket) return;
+  netSendTimer -= dt;
+  if (netSendTimer <= 0) {
+    netSendTimer = NET_RATE;
+    const mine = (myNum === 1) ? p1 : p2;
+    socket.emit('state', {
+      x: mine.pos.x, y: mine.pos.y, z: mine.pos.z,
+      yaw: mine.yaw, mv: mine.moving ? 1 : 0, ch: mine.charging ? mine.charge : -1
+    });
+    if (isHost) {
+      const frozen = roundPause > 0;
+      socket.emit('balloon', {
+        px: balloon.position.x, py: balloon.position.y, pz: balloon.position.z,
+        vx: frozen ? 0 : balloonVel.x, vy: frozen ? 0 : balloonVel.y, vz: frozen ? 0 : balloonVel.z,
+        qx: balloon.quaternion.x, qy: balloon.quaternion.y,
+        qz: balloon.quaternion.z, qw: balloon.quaternion.w,
+        lt: lastToucher, f: frozen ? 1 : 0, rp: roundPause
+      });
+      socket.emit('event', { t: 'timer', timeLeft, sd: suddenDeath });
+    }
+  }
+  // Smooth the remote player toward its last known transform
+  const rp = (myNum === 1) ? p2 : p1;
+  if (rp.netTarget) {
+    const t = Math.min(1, dt * 14);
+    rp.pos.x += (rp.netTarget.x - rp.pos.x) * t;
+    rp.pos.y += (rp.netTarget.y - rp.pos.y) * t;
+    rp.pos.z += (rp.netTarget.z - rp.pos.z) * t;
+    let dy = rp.netTarget.yaw - rp.yaw;
+    while (dy > Math.PI) dy -= Math.PI*2;
+    while (dy < -Math.PI) dy += Math.PI*2;
+    rp.yaw += dy * t;
+    rp.moving = !!rp.netTarget.mv;
+    rp.charging = rp.netTarget.ch >= 0;
+    rp.charge = Math.max(0, rp.netTarget.ch);
+    rp.body.position.set(rp.pos.x, rp.pos.y, rp.pos.z);
+    rp.body.rotation.y = rp.yaw;
+  }
+}
+/* ================= SCORING ================= */
+function finishMatch() {
+  const winner = score1 > score2 ? 1 : 2;
+  const c = PALETTE[playerColorIdx[winner-1]].name;
+  const title = '🏆';
+  const body = '<b style="font-size:30px">Player ' + winner + ' (' + c + ') wins!</b><br>' +
+               'Final score: ' + score1 + ' : ' + score2;
+  if (online && isHost && socket) socket.emit('event', { t: 'end', title, body });
+  endGame(title, body);
+}
+
+function pointScored(byPlayer, customMsg) {
+  if (byPlayer === 1) score1++; else score2++;
+  score1El.textContent = score1;
+  score2El.textContent = score2;
+
+  if (score1 >= WIN_SCORE || score2 >= WIN_SCORE || suddenDeath) {
+    finishMatch();
+    return;
+  }
+
+  const msg = customMsg || (byPlayer === 1
+    ? 'Point for Player 1! Player 2 failed to save'
+    : 'Point for Player 2! Player 1 failed to save');
+  roundMsgEl.textContent = msg;
+  roundMsgEl.style.display = 'block';
+  roundPause = 1.6;
+  if (online && isHost && socket) socket.emit('event', { t: 'score', s1: score1, s2: score2, msg });
+}
+
+function timeExpired() {
+  if (score1 !== score2) {
+    finishMatch();
+  } else {
+    suddenDeath = true;
+    timerEl.textContent = '⚡';
+    roundMsgEl.textContent = 'Tie! Overtime — next point wins ⚡';
+    roundMsgEl.style.display = 'block';
+    setTimeout(() => { if (state === 'playing') roundMsgEl.style.display = 'none'; }, 2500);
+  }
+}
+
+/* ================= BALLOON PHYSICS ================= */
+function collideBalloonWithBox(box) {
+  const p = balloon.position;
+  const cx = Math.max(box.min.x, Math.min(p.x, box.max.x));
+  const cy = Math.max(box.min.y, Math.min(p.y, box.max.y));
+  const cz = Math.max(box.min.z, Math.min(p.z, box.max.z));
+  const delta = new THREE.Vector3(p.x - cx, p.y - cy, p.z - cz);
+  const dist = delta.length();
+
+  if (dist < BALLOON_R && dist > 0.0001) {
+    const n = delta.clone().normalize();
+    p.addScaledVector(n, BALLOON_R - dist);
+    const vn = balloonVel.dot(n);
+    if (vn < 0) balloonVel.addScaledVector(n, -vn * 1.55);
+    const tangent = balloonVel.clone().sub(n.clone().multiplyScalar(balloonVel.dot(n)));
+    balloonAngVel.add(new THREE.Vector3().crossVectors(n, tangent).multiplyScalar(1.2));
+  } else if (dist <= 0.0001) {
+    p.y = box.max.y + BALLOON_R;
+    balloonVel.y = Math.abs(balloonVel.y) * 0.5 + 0.5;
+  }
+}
+
+function playerPushesBalloon(pl, id) {
+  const eyePos = pl.pos.clone(); eyePos.y += PLAYER.height * 0.6;
+  const toB = balloon.position.clone().sub(eyePos);
+  const flatDist = Math.hypot(toB.x, toB.z);
+  if (flatDist < PLAYER.radius + BALLOON_R && toB.y > -PLAYER.height*0.6 && toB.y < PLAYER.height) {
+    const push = new THREE.Vector3(toB.x, 0.3, toB.z).normalize().multiplyScalar(0.6);
+    balloonVel.add(push);
+    balloonAngVel.x += (Math.random()-0.5) * 2;
+    balloonAngVel.z += (Math.random()-0.5) * 2;
+    // Note: body contact nudges the balloon but does NOT count as a hit for the turn rule
+  }
+}
+
+function updateBalloon(dt) {
+  if (online && !isHost) { updateBalloonRemote(dt); return; }   // guest: smoothed network balloon
+  balloonVel.y += balloonGravity * dt;
+  balloonVel.multiplyScalar(Math.max(0, 1 - balloonDrag * dt));
+
+  balloonVel.x += Math.sin(performance.now()*0.0007) * 0.2 * dt;
+  balloonVel.z += Math.cos(performance.now()*0.0009) * 0.2 * dt;
+
+  balloon.position.addScaledVector(balloonVel, dt);
+
+  const r = BALLOON_R;
+  if (balloon.position.x >  ROOM.w/2 - r) { balloon.position.x =  ROOM.w/2 - r; balloonVel.x *= -0.55; balloonAngVel.y += (Math.random()-0.5)*3; }
+  if (balloon.position.x < -ROOM.w/2 + r) { balloon.position.x = -ROOM.w/2 + r; balloonVel.x *= -0.55; balloonAngVel.y += (Math.random()-0.5)*3; }
+  if (balloon.position.z >  ROOM.d/2 - r) { balloon.position.z =  ROOM.d/2 - r; balloonVel.z *= -0.55; balloonAngVel.y += (Math.random()-0.5)*3; }
+  if (balloon.position.z < -ROOM.d/2 + r) { balloon.position.z = -ROOM.d/2 + r; balloonVel.z *= -0.55; balloonAngVel.y += (Math.random()-0.5)*3; }
+
+  if (balloon.position.y > ROOM.h - r*1.12) {
+    balloon.position.y = ROOM.h - r*1.12;
+    balloonVel.y *= -0.4;
+    const toCenter = new THREE.Vector3(-balloon.position.x, 0, -balloon.position.z);
+    if (toCenter.lengthSq() > 0.01) {
+      toCenter.normalize().multiplyScalar(1.3);
+      balloonVel.x += toCenter.x;
+      balloonVel.z += toCenter.z;
+    }
+  }
+
+  for (const box of obstacles) {
+    if (box.extra && !extrasEnabled) continue;
+    collideBalloonWithBox(box);
+  }
+  playerPushesBalloon(p1, 1);
+  if (isDuel()) playerPushesBalloon(p2, 2);
+
+  /* Spin + damping + soft self-righting (heavy knot pulls down) */
+  if (balloonAngVel.lengthSq() > 0.0001) {
+    const axis = balloonAngVel.clone().normalize();
+    const angle = balloonAngVel.length() * dt;
+    const dq = new THREE.Quaternion().setFromAxisAngle(axis, angle);
+    balloon.quaternion.premultiply(dq);
+    balloonAngVel.multiplyScalar(Math.max(0, 1 - 1.1 * dt));
+  }
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(balloon.quaternion);
+  const righting = new THREE.Vector3().crossVectors(up, new THREE.Vector3(0, 1, 0));
+  balloonAngVel.addScaledVector(righting, 0.9 * dt * 3);
+
+  /* Floor */
+  if (balloon.position.y < r*1.12 && roundPause <= 0 && state === 'playing') {
+    balloon.position.y = r*1.12;
+
+    if (mode === 'free') {
+      fpBest = Math.max(fpBest, fpAirTime);
+      endGame('🎈💥', 'The balloon touched the floor!<br>' +
+        'You lasted <b>' + fpAirTime.toFixed(1) + 's</b> with <b>' + fpHits + '</b> slaps.<br>' +
+        'Best: <b>' + fpBest.toFixed(1) + 's</b>');
+      return;
+    }
+
+    // 1v1
+    if (lastToucher === 0) {
+      if (!suddenDeath) {
+        timeLeft = Math.max(0, timeLeft - 10);
+        timerEl.textContent = formatTime(timeLeft);
+        timerEl.classList.toggle('low', timeLeft <= 30);
+      }
+      const pmsg = 'Nobody touched it! ⏱️ -10s — new serve';
+      roundMsgEl.textContent = pmsg;
+      roundMsgEl.style.display = 'block';
+      roundPause = 1.2;
+      if (online && isHost && socket) socket.emit('event', { t: 'timer', timeLeft, sd: suddenDeath, msg: pmsg });
+      if (timeLeft <= 0 && !suddenDeath) timeExpired();
+    } else {
+      pointScored(lastToucher);
+    }
+  }
+}
+
+/* ================= PLAYER PHYSICS ================= */
+function groundHeightAt(pl) {
+  let h = 0;
+  for (const box of obstacles) {
+    if (box.extra && !extrasEnabled) continue;
+    if (pl.pos.x > box.min.x - PLAYER.radius*0.6 && pl.pos.x < box.max.x + PLAYER.radius*0.6 &&
+        pl.pos.z > box.min.z - PLAYER.radius*0.6 && pl.pos.z < box.max.z + PLAYER.radius*0.6) {
+      if (box.max.y <= pl.pos.y + 0.35) h = Math.max(h, box.max.y);
+    }
+  }
+  return h;
+}
+
+function resolvePlayerBoxCollision(pl, box) {
+  if (pl.pos.y >= box.max.y - 0.05) return;
+  if (pl.pos.y + PLAYER.height <= box.min.y) return;
+
+  const ex = { min: box.min.x - PLAYER.radius, max: box.max.x + PLAYER.radius };
+  const ez = { min: box.min.z - PLAYER.radius, max: box.max.z + PLAYER.radius };
+  const p = pl.pos;
+  if (p.x > ex.min && p.x < ex.max && p.z > ez.min && p.z < ez.max) {
+    const dxMin = p.x - ex.min, dxMax = ex.max - p.x;
+    const dzMin = p.z - ez.min, dzMax = ez.max - p.z;
+    const m = Math.min(dxMin, dxMax, dzMin, dzMax);
+    if (m === dxMin) p.x = ex.min;
+    else if (m === dxMax) p.x = ex.max;
+    else if (m === dzMin) p.z = ez.min;
+    else p.z = ez.max;
+  }
+}
+
+function movePlayer(pl, fwdKey, backKey, rightKey, leftKey, jumpHeld, dt) {
+  const forward = new THREE.Vector3(-Math.sin(pl.yaw), 0, -Math.cos(pl.yaw));
+  const rightv  = new THREE.Vector3(-forward.z, 0, forward.x);
+  const move = new THREE.Vector3();
+  if (keys[fwdKey])   move.add(forward);
+  if (keys[backKey])  move.sub(forward);
+  if (keys[rightKey]) move.add(rightv);
+  if (keys[leftKey])  move.sub(rightv);
+  pl.moving = move.lengthSq() > 0;
+  if (pl.moving) {
+    const spd = PLAYER.speed * (pl.dashTimer > 0 ? DASH_MULT : 1);
+    move.normalize().multiplyScalar(spd * dt);
+    pl.pos.add(move);
+  }
+  if (pl.dashTimer > 0) pl.dashTimer -= dt;
+  if (pl.dashCd > 0) pl.dashCd -= dt;
+
+  const m = PLAYER.radius + 0.05;
+  pl.pos.x = Math.max(-ROOM.w/2 + m, Math.min(ROOM.w/2 - m, pl.pos.x));
+  pl.pos.z = Math.max(-ROOM.d/2 + m, Math.min(ROOM.d/2 - m, pl.pos.z));
+
+  for (const box of obstacles) {
+    if (box.extra && !extrasEnabled) continue;
+    resolvePlayerBoxCollision(pl, box);
+  }
+
+  const ground = groundHeightAt(pl);
+
+  if (jumpHeld && pl.onGround) {
+    pl.vy = PLAYER.jump;
+    pl.onGround = false;
+  }
+
+  pl.vy += GRAVITY_PLAYER * dt;
+  pl.pos.y += pl.vy * dt;
+
+  if (pl.pos.y + PLAYER.height > ROOM.h) {
+    pl.pos.y = ROOM.h - PLAYER.height;
+    if (pl.vy > 0) pl.vy = 0;
+  }
+
+  if (pl.pos.y <= ground) {
+    pl.pos.y = ground;
+    pl.vy = 0;
+    pl.onGround = true;
+  } else {
+    pl.onGround = false;
+  }
+
+  if (pl.slapTimer > 0) pl.slapTimer -= dt;
+
+  pl.body.position.set(pl.pos.x, pl.pos.y, pl.pos.z);
+  pl.body.rotation.y = pl.yaw;
+}
+
+function updatePlayers(dt) {
+  if (online) {
+    // Online: I always drive my own player with WASD + mouse; the other is network-driven.
+    // With a menu open, movement keys are ignored but physics still runs.
+    const mine = (myNum === 1) ? p1 : p2;
+    const menuOpen = (state !== 'playing');
+    if (menuOpen) {
+      movePlayer(mine, '__none', '__none', '__none', '__none', false, dt);
+    } else {
+      movePlayer(mine, 'KeyW', 'KeyS', 'KeyD', 'KeyA', keys['Space'], dt);
+    }
+    return;
+  }
+
+  movePlayer(p1, 'KeyW', 'KeyS', 'KeyD', 'KeyA', keys['Space'], dt);
+
+  if (mode === '1v1') {
+    const eye2 = p2.pos.clone(); eye2.y += PLAYER.height;
+    const toB = balloon.position.clone().sub(eye2);
+    p2.yaw = Math.atan2(-toB.x, -toB.z);
+    p2.pitch = Math.atan2(toB.y, Math.hypot(toB.x, toB.z));
+    p2.pitch = Math.max(-1.35, Math.min(1.35, p2.pitch));
+    movePlayer(p2, 'ArrowUp', 'ArrowDown', 'ArrowRight', 'ArrowLeft', false, dt);
+  }
+}
+
+function setCamera(cam, pl) {
+  cam.position.set(pl.pos.x, pl.pos.y + PLAYER.height, pl.pos.z);
+  cam.rotation.order = 'YXZ';
+  cam.rotation.y = pl.yaw;
+  cam.rotation.x = pl.pitch;
+  if (pl.punchAnim > 0) {
+    const f = new THREE.Vector3();
+    cam.getWorldDirection(f);
+    cam.position.addScaledVector(f, Math.sin(pl.punchAnim/0.18*Math.PI) * 0.07);
+  }
+}
+
+/* ================= MAIN LOOP ================= */
+const chargeFill1 = document.getElementById('chargeFill1');
+const chargeFill2 = document.getElementById('chargeFill2');
+
+let last = performance.now();
+function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = Math.min((now - last)/1000, 0.05);
+  last = now;
+
+  // Online keeps simulating while a menu is open — matches never freeze for the other player
+  const simulating = (state === 'playing') || (online && state === 'paused');
+  if (simulating) {
+    if (isDuel() && !suddenDeath) {
+      if (!online || isHost) {
+        timeLeft -= dt;
+        if (timeLeft <= 0) {
+          timeLeft = 0;
+          timeExpired();
+        } else {
+          timerEl.textContent = formatTime(timeLeft);
+          timerEl.classList.toggle('low', timeLeft <= 30);
+        }
+      } else {
+        // Guest: run the clock locally between host packets so it never looks frozen
+        timeLeft = Math.max(0, timeLeft - dt);
+        timerEl.textContent = formatTime(timeLeft);
+        timerEl.classList.toggle('low', timeLeft <= 30);
+      }
+    }
+
+    if (roundPause > 0) {
+      roundPause -= dt;                       // both sides tick, so nobody freezes
+      if (roundPause <= 0) {
+        if (!online || isHost) {
+          resetPositions();
+          if (online && isHost && socket) socket.emit('event', { t: 'serve' });
+        } else {
+          roundMsgEl.style.display = 'none';  // guest waits for the host's serve packet
+        }
+      }
+    } else {
+      updatePlayers(dt);
+      updateBalloon(dt);
+      if (mode === 'free' && state === 'playing') {
+        fpAirTime += dt;
+        airTimeEl.textContent = fpAirTime.toFixed(1);
+      }
+    }
+
+    netTick(dt);
+
+    if (p1.punchAnim > 0) p1.punchAnim -= dt;
+    if (p2.punchAnim > 0) p2.punchAnim -= dt;
+
+    for (const pl of [p1, p2]) {
+      if (pl.charging) pl.charge = Math.min(1, pl.charge + dt / CHARGE_TIME);
+    }
+    chargeFill1.style.width = (p1.charge * 100) + '%';
+    chargeFill2.style.width = (p2.charge * 100) + '%';
+
+    // Dash indicators: lightning when ready, countdown while cooling
+    [[p1, 'dash1'], [p2, 'dash2']].forEach(([pl, id]) => {
+      const el = document.getElementById(id);
+      if (pl.dashCd > 0) {
+        el.textContent = Math.ceil(pl.dashCd);
+        el.classList.add('cooling');
+      } else {
+        el.textContent = '⚡';
+        el.classList.remove('cooling');
+      }
+    });
+
+    const walkT = now * 0.012;
+    for (const pl of [p1, p2]) {
+      const ud = pl.body.userData;
+      const sw = pl.moving ? Math.sin(walkT) * 0.55 : 0;
+      const ease = Math.min(1, dt * 12);
+      ud.legL.rotation.x += ( sw - ud.legL.rotation.x) * ease;
+      ud.legR.rotation.x += (-sw - ud.legR.rotation.x) * ease;
+      ud.armL.rotation.x += (-sw * 0.7 - ud.armL.rotation.x) * ease;
+      const arm = ud.armR;
+      if (pl.punchAnim > 0) {
+        arm.rotation.x = 2.4 - (1 - pl.punchAnim/0.18) * 3.4;
+      } else if (pl.charging) {
+        arm.rotation.x = 1.6 + pl.charge * 0.9;
+      } else {
+        arm.rotation.x += (sw * 0.7 - arm.rotation.x) * ease;
+      }
+    }
+  }
+
+  const w = innerWidth, h = innerHeight;
+
+  if (online) {
+    const cam = myCamera();
+    setCamera(cam, myPlayer());
+    myPlayer().body.visible = false;
+    ((myNum === 1) ? p2 : p1).body.visible = true;
+    renderer.setViewport(0, 0, w, h);
+    renderer.setScissor(0, 0, w, h);
+    renderer.render(scene, cam);
+    myPlayer().body.visible = true;
+  } else if (mode === '1v1') {
+    setCamera(camera1, p1);
+    setCamera(camera2, p2);
+
+    p1.body.visible = false; p2.body.visible = true;
+    renderer.setViewport(0, 0, w/2, h);
+    renderer.setScissor(0, 0, w/2, h);
+    renderer.render(scene, camera1);
+
+    p1.body.visible = true; p2.body.visible = false;
+    renderer.setViewport(w/2, 0, w/2, h);
+    renderer.setScissor(w/2, 0, w/2, h);
+    renderer.render(scene, camera2);
+
+    p1.body.visible = true; p2.body.visible = true;
+  } else {
+    setCamera(camera1, p1);
+    p1.body.visible = false;
+    p2.body.visible = false;
+    renderer.setViewport(0, 0, w, h);
+    renderer.setScissor(0, 0, w, h);
+    renderer.render(scene, camera1);
+  }
+}
+requestAnimationFrame(loop);
+
+function updateAspect() {
+  if (online) {
+    camera1.aspect = innerWidth/innerHeight;
+    camera2.aspect = innerWidth/innerHeight;
+  } else if (mode === '1v1') {
+    camera1.aspect = (innerWidth/2)/innerHeight;
+    camera2.aspect = (innerWidth/2)/innerHeight;
+  } else {
+    camera1.aspect = innerWidth/innerHeight;
+  }
+  camera1.updateProjectionMatrix();
+  camera2.updateProjectionMatrix();
+}
+document.querySelectorAll('.modeCard').forEach(c => c.addEventListener('click', updateAspect));
+updateAspect();
+
+addEventListener('resize', () => {
+  updateAspect();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
