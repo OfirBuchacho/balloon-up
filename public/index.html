@@ -949,7 +949,7 @@ function tryDash(pl) {
 
 /* ================= INPUT ================= */
 const keys = {};
-const GAME_KEYS = ['KeyW','KeyA','KeyS','KeyD','Space','ShiftLeft','ControlRight',
+const GAME_KEYS = ['KeyW','KeyA','KeyS','KeyD','Space','ShiftLeft','ControlRight','Backquote',
                    'ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter','ShiftRight'];
 addEventListener('keydown', e => {
   keys[e.code] = true;
@@ -2245,8 +2245,9 @@ function updateNetDebug() {
     'balloon y ' + balloon.position.y.toFixed(2);
 }
 
+// Backquote (`) toggles diagnostics — F3 is taken by Chrome's find-in-page
 addEventListener('keydown', e => {
-  if (e.code === 'F3') {
+  if (e.code === 'Backquote' || e.code === 'F9') {
     e.preventDefault();
     netDebug.on = !netDebug.on;
     netDebugEl.style.display = netDebug.on ? 'block' : 'none';
