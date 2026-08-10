@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Balloon Up! — Connection Test</title>
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #1a1626; color: #fff;
+         display: flex; flex-direction: column; align-items: center; padding-top: 40px; }
+  h1 { color: #ffd166; }
+  input, button { font-size: 18px; padding: 8px 16px; margin: 6px; border-radius: 8px; border: none; }
+  button { background: #ffd166; cursor: pointer; font-weight: 700; }
+  #status { margin: 14px; font-size: 18px; color: #9be29b; min-height: 26px; }
+  #arena { width: 500px; height: 300px; background: #2a2440; border-radius: 12px;
+           position: relative; margin-top: 10px; cursor: crosshair; }
+  .dot { width: 22px; height: 22px; border-radius: 50%; position: absolute;
+         transform: translate(-50%,-50%); transition: left 0.05s linear, top 0.05s linear; }
+  #me { background: #4668b5; }
+  #peer { background: #d97b2f; display: none; }
+</style>
+</head>
+<body>
+<h1>🎈 Connection Test</h1>
+<div>
+  <button id="createBtn">Create Room</button>
+  <input id="codeInput" placeholder="CODE" maxlength="4" style="width:90px; text-transform:uppercase">
+  <button id="joinBtn">Join</button>
+</div>
+<div id="status">Not connected to a room</div>
+<div id="arena">
+  <div id="me" class="dot"></div>
+  <div id="peer" class="dot"></div>
+</div>
+<p style="color:#889">Move your mouse inside the box — the orange dot is your friend's mouse from the other tab/computer.</p>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+const status = document.getElementById('status');
+const arena = document.getElementById('arena');
+const me = document.getElementById('me');
+const peer = document.getElementById('peer');
+
+document.getElementById('createBtn').onclick = () => {
+  socket.emit('createRoom', { name: 'Host', color: 0, settings: { test: true } }, res => {
+    status.textContent = res.ok ? 'Room created! Code: ' + res.code + ' — waiting for a friend…' : res.error;
+  });
+};
+
+document.getElementById('joinBtn').onclick = () => {
+  const code = document.getElementById('codeInput').value;
+  socket.emit('joinRoom', { code, name: 'Guest', color: 1 }, res => {
+    status.textContent = res.ok ? 'Joined room ' + res.code + '!' : ('Error: ' + res.error);
+  });
+};
+
+socket.on('roomUpdate', d => {
+  if (d.players.length === 2) status.textContent = 'Both players connected! Move your mouse in the box.';
+});
+socket.on('peerLeft', () => {
+  status.textContent = 'Your friend disconnected.';
+  peer.style.display = 'none';
+});
+
+let lastSend = 0;
+arena.addEventListener('mousemove', e => {
+  const r = arena.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  me.style.left = x + 'px'; me.style.top = y + 'px';
+  const now = performance.now();
+  if (now - lastSend > 50) {           // ~20Hz, same rate the game will use
+    lastSend = now;
+    socket.emit('state', { x, y });
+  }
+});
+
+socket.on('state', d => {
+  peer.style.display = 'block';
+  peer.style.left = d.x + 'px';
+  peer.style.top = d.y + 'px';
+});
+</script>
+</body>
+</html>
