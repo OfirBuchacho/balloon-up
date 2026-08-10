@@ -167,6 +167,11 @@
   .ctpIcon { font-size: 46px; }
   .ctpTitle { font-size: 26px; font-weight: 800; color: #ffd166; margin: 8px 0 10px; }
   .ctpSub { font-size: 16px; color: #c8c8dc; line-height: 1.6; }
+  #errBanner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 99; display: none;
+    background: #b3261e; color: #fff; font-size: 14px; font-family: monospace;
+    padding: 10px 16px; text-align: left; white-space: pre-wrap; max-height: 30vh; overflow: auto;
+  }
   #netMsg {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 9;
     background: rgba(20,20,30,0.85); color: #ffd166; font-size: 22px; font-weight: 700;
@@ -174,6 +179,12 @@
   }
   #endText { font-size: 22px; color: #d8d8e8; margin-bottom: 10px; }
   #endTitle { font-size: 44px; font-weight: 900; margin-bottom: 8px; }
+  .menu.liveMatch {
+    background: rgba(10,10,20,0.55);
+  }
+  .menu.liveMatch .liveWarn {
+    color: #ff9f43; font-size: 17px; font-weight: 700; margin-bottom: 14px;
+  }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -331,7 +342,8 @@
 
 <!-- PAUSE MENU -->
 <div id="pauseMenu" class="menu hidden">
-  <h2>⏸ PAUSED</h2>
+  <h2 id="pauseTitle">⏸ PAUSED</h2>
+  <div id="liveWarn" class="liveWarn hidden">⚠️ The match is still running — your rival isn't waiting!</div>
   <button class="menuBtn primary" id="resumeBtn">RESUME GAME</button>
   <button class="menuBtn" id="rematchBtn">REMATCH</button>
   <button class="menuBtn" id="pauseMainBtn">MAIN MENU</button>
@@ -345,6 +357,7 @@
   <button class="menuBtn" id="endMainBtn">MAIN MENU</button>
 </div>
 
+<div id="errBanner"></div>
 <div id="netMsg"></div>
 <div id="clickToPlay" class="hidden">
   <div class="ctpBox">
@@ -358,6 +371,19 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 "use strict";
+
+/* Surface any runtime error on screen — silent failures are impossible to debug remotely */
+(function () {
+  const banner = document.getElementById('errBanner');
+  function show(msg) {
+    if (!banner) return;
+    banner.style.display = 'block';
+    banner.textContent = '⚠️ ' + msg;
+  }
+  window.addEventListener('error', e => show(e.message + '  (line ' + e.lineno + ')'));
+  window.addEventListener('unhandledrejection', e => show('Promise: ' + (e.reason && e.reason.message || e.reason)));
+  window.__gameError = show;
+})();
 
 /* ================= SETTINGS ================= */
 const ROOM = { w: 26, d: 20, h: 10 };
@@ -1366,8 +1392,11 @@ function beginPlaying() {
 function pauseGame() {
   if (state !== 'playing') return;
   state = 'paused';
-  setHudVisible(false);
   hideClickToPlay();
+  // Online matches never freeze — the clock and the balloon keep running for both
+  // players, exactly like modern multiplayer games. Only the local HUD steps aside.
+  if (!online) setHudVisible(false);
+  syncPauseMenuButtons();
   pauseMenu.classList.remove('hidden');
 }
 
@@ -1376,6 +1405,14 @@ function resumeGame() {
   pauseMenu.classList.add('hidden');
   if (fallbackMode) beginPlaying();
   else requestLock();
+}
+
+/* Online: REMATCH would desync the two clients mid-match, so it's host-and-local only */
+function syncPauseMenuButtons() {
+  document.getElementById('rematchBtn').classList.toggle('hidden', online);
+  document.getElementById('liveWarn').classList.toggle('hidden', !online);
+  document.getElementById('pauseTitle').textContent = online ? '⏸ MENU' : '⏸ PAUSED';
+  pauseMenu.classList.toggle('liveMatch', online);
 }
 
 function startNewMatch() {
@@ -1588,7 +1625,8 @@ function connectSocket() {
 }
 
 function currentSettings() {
-  const diffKey = document.querySelector('.diffBtn.selected').dataset.diff;
+  const sel = document.querySelector('.diffBtn.selected');
+  const diffKey = sel ? sel.dataset.diff : 'normal';
   return {
     diff: diffKey,
     time: matchTime,
@@ -1672,8 +1710,22 @@ document.getElementById('confirmJoinBtn').onclick = doJoin;
 codeInput.addEventListener('keydown', e => { if (e.code === 'Enter') doJoin(); });
 
 startMatchBtn.onclick = () => {
-  socket.emit('updateSettings', currentSettings());
-  socket.emit('startMatch');
+  if (!socket || !socket.connected) {
+    hostStatus.textContent = '⚠️ Lost connection to the server — reload the page.';
+    return;
+  }
+  try {
+    socket.emit('updateSettings', currentSettings());
+    socket.emit('startMatch');
+    hostStatus.textContent = 'Starting…';
+    // If the server never answers, say so rather than hanging on this screen
+    setTimeout(() => {
+      if (!online) hostStatus.textContent = '⚠️ The server did not start the match. Is your friend still connected?';
+    }, 3000);
+  } catch (err) {
+    hostStatus.textContent = '⚠️ ' + err.message;
+    if (window.__gameError) window.__gameError(err.message);
+  }
 };
 
 /* Guest keeps its own colour when the host's settings arrive */
@@ -1685,6 +1737,7 @@ applyRemoteSettings = function (sv) {
 };
 
 function startOnlineMatch() {
+  try {
   online = true;
   mode = 'online';
   state = 'starting';
@@ -1696,6 +1749,10 @@ function startOnlineMatch() {
   startNewMatch();
   if (fallbackMode) beginPlaying();
   else requestLock();
+  } catch (err) {
+    if (window.__gameError) window.__gameError('startOnlineMatch: ' + err.message);
+    throw err;
+  }
 }
 
 /* Send my transform + receive/interpolate the opponent's */
@@ -1981,9 +2038,15 @@ function movePlayer(pl, fwdKey, backKey, rightKey, leftKey, jumpHeld, dt) {
 
 function updatePlayers(dt) {
   if (online) {
-    // Online: I always drive my own player with WASD + mouse; the other is network-driven
+    // Online: I always drive my own player with WASD + mouse; the other is network-driven.
+    // With a menu open, movement keys are ignored but physics still runs.
     const mine = (myNum === 1) ? p1 : p2;
-    movePlayer(mine, 'KeyW', 'KeyS', 'KeyD', 'KeyA', keys['Space'], dt);
+    const menuOpen = (state !== 'playing');
+    if (menuOpen) {
+      movePlayer(mine, '__none', '__none', '__none', '__none', false, dt);
+    } else {
+      movePlayer(mine, 'KeyW', 'KeyS', 'KeyD', 'KeyA', keys['Space'], dt);
+    }
     return;
   }
 
@@ -2016,12 +2079,16 @@ const chargeFill1 = document.getElementById('chargeFill1');
 const chargeFill2 = document.getElementById('chargeFill2');
 
 let last = performance.now();
-function loop(now) {
-  requestAnimationFrame(loop);
-  const dt = Math.min((now - last)/1000, 0.05);
-  last = now;
 
-  if (state === 'playing') {
+/* The simulation is split out of the render loop on purpose: browsers throttle
+   requestAnimationFrame in background tabs almost to a stop, which froze the host's
+   physics (and therefore the guest's balloon) whenever the window lost focus.
+   A Web Worker timer — which browsers do NOT throttle — drives simulation as well,
+   so the match keeps running whatever window you're looking at. */
+function stepGame(dt) {
+  // Online keeps simulating while a menu is open — matches never freeze for the other player
+  const simulating = (state === 'playing') || (online && state === 'paused');
+  if (simulating) {
     if (isDuel() && !suddenDeath) {
       if (!online || isHost) {
         timeLeft -= dt;
@@ -2082,7 +2149,7 @@ function loop(now) {
       }
     });
 
-    const walkT = now * 0.012;
+    const walkT = performance.now() * 0.012;
     for (const pl of [p1, p2]) {
       const ud = pl.body.userData;
       const sw = pl.moving ? Math.sin(walkT) * 0.55 : 0;
@@ -2100,7 +2167,10 @@ function loop(now) {
       }
     }
   }
+}
 
+/* Rendering stays on requestAnimationFrame — no point drawing a hidden window */
+function renderFrame() {
   const w = innerWidth, h = innerHeight;
 
   if (online) {
@@ -2136,7 +2206,41 @@ function loop(now) {
     renderer.render(scene, camera1);
   }
 }
+/* ---- Fixed-step driver: fed by rAF when visible, by a Worker timer when not ---- */
+let lastStep = performance.now();
+
+function tick() {
+  const now = performance.now();
+  let dt = (now - lastStep) / 1000;
+  if (dt <= 0.001) return;               // another driver already stepped this instant
+  lastStep = now;
+  if (dt > 0.1) dt = 0.1;                // don't let a long stall teleport the world
+  stepGame(dt);
+}
+
+function loop() {
+  requestAnimationFrame(loop);
+  tick();
+  renderFrame();
+}
 requestAnimationFrame(loop);
+
+/* Browsers throttle timers in background tabs but not Web Workers, so a Worker
+   heartbeat keeps the simulation alive when the window isn't focused. */
+(function startBackgroundTicker() {
+  try {
+    const src = 'let id=null; onmessage=e=>{ if(e.data==="start"&&!id){ id=setInterval(()=>postMessage(0),16); } else if(e.data==="stop"&&id){ clearInterval(id); id=null; } };';
+    const worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'application/javascript' })));
+    worker.onmessage = () => { if (document.hidden) tick(); };
+    worker.postMessage('start');
+  } catch (err) {
+    // Worker blocked (rare) — fall back to a plain interval, throttled but better than nothing
+    setInterval(() => { if (document.hidden) tick(); }, 100);
+  }
+})();
+
+/* Coming back to the window shouldn't replay the missed time in one jump */
+document.addEventListener('visibilitychange', () => { lastStep = performance.now(); });
 
 function updateAspect() {
   if (online) {
