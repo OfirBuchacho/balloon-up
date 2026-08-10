@@ -167,6 +167,11 @@
   .ctpIcon { font-size: 46px; }
   .ctpTitle { font-size: 26px; font-weight: 800; color: #ffd166; margin: 8px 0 10px; }
   .ctpSub { font-size: 16px; color: #c8c8dc; line-height: 1.6; }
+  #netDebug {
+    position: fixed; bottom: 8px; left: 8px; z-index: 90; display: none;
+    background: rgba(0,0,0,0.75); color: #7CFC98; font-family: monospace; font-size: 12px;
+    padding: 8px 12px; border-radius: 8px; line-height: 1.5; white-space: pre; pointer-events: none;
+  }
   #errBanner {
     position: fixed; top: 0; left: 0; right: 0; z-index: 99; display: none;
     background: #b3261e; color: #fff; font-size: 14px; font-family: monospace;
@@ -358,6 +363,7 @@
 </div>
 
 <div id="errBanner"></div>
+<div id="netDebug"></div>
 <div id="netMsg"></div>
 <div id="clickToPlay" class="hidden">
   <div class="ctpBox">
@@ -384,6 +390,10 @@
   window.addEventListener('unhandledrejection', e => show('Promise: ' + (e.reason && e.reason.message || e.reason)));
   window.__gameError = show;
 })();
+
+/* Diagnostics — press F3 in game to see what the network is actually doing */
+const netDebug = { on: false, worker: false, rx: 0, tx: 0, rxRate: 0, txRate: 0,
+                   lastRx: 0, steps: 0, stepRate: 0, frames: 0, fps: 0, since: 0 };
 
 /* ================= SETTINGS ================= */
 const ROOM = { w: 26, d: 20, h: 10 };
@@ -1576,6 +1586,7 @@ function connectSocket() {
     balloonNet.has = true;
     balloonNet.frozen = !!d.f;                  // host paused the round — stop predicting
     balloonNet.stamp = performance.now();
+    netDebug.rx++; netDebug.lastRx = balloonNet.stamp;
     // Host is authoritative about the round pause, so the guest can never get stuck
     roundPause = d.rp || 0;
     if (roundPause <= 0) roundMsgEl.style.display = 'none';
@@ -1767,6 +1778,7 @@ function netTick(dt) {
       yaw: mine.yaw, mv: mine.moving ? 1 : 0, ch: mine.charging ? mine.charge : -1
     });
     if (isHost) {
+      netDebug.tx++;
       const frozen = roundPause > 0;
       socket.emit('balloon', {
         px: balloon.position.x, py: balloon.position.y, pz: balloon.position.z,
@@ -2086,6 +2098,7 @@ let last = performance.now();
    A Web Worker timer — which browsers do NOT throttle — drives simulation as well,
    so the match keeps running whatever window you're looking at. */
 function stepGame(dt) {
+  netDebug.steps++;
   // Online keeps simulating while a menu is open — matches never freeze for the other player
   const simulating = (state === 'playing') || (online && state === 'paused');
   if (simulating) {
@@ -2171,6 +2184,8 @@ function stepGame(dt) {
 
 /* Rendering stays on requestAnimationFrame — no point drawing a hidden window */
 function renderFrame() {
+  netDebug.frames++;
+  updateNetDebug();
   const w = innerWidth, h = innerHeight;
 
   if (online) {
@@ -2206,6 +2221,38 @@ function renderFrame() {
     renderer.render(scene, camera1);
   }
 }
+const netDebugEl = document.getElementById('netDebug');
+function updateNetDebug() {
+  if (!netDebug.on) return;
+  const now = performance.now();
+  if (now - netDebug.since >= 1000) {
+    netDebug.rxRate = netDebug.rx; netDebug.txRate = netDebug.tx;
+    netDebug.stepRate = netDebug.steps; netDebug.fps = netDebug.frames;
+    netDebug.rx = netDebug.tx = netDebug.steps = netDebug.frames = 0;
+    netDebug.since = now;
+  }
+  const age = netDebug.lastRx ? Math.round(now - netDebug.lastRx) : -1;
+  netDebugEl.textContent =
+    'mode      ' + mode + (online ? (isHost ? ' (HOST)' : ' (GUEST)') : '') + '\n' +
+    'state     ' + state + '\n' +
+    'socket    ' + (socket && socket.connected ? 'connected' : 'NOT CONNECTED') + '\n' +
+    'worker    ' + (netDebug.worker ? 'yes' : 'no') + '\n' +
+    'fps       ' + netDebug.fps + '   sim/s ' + netDebug.stepRate + '\n' +
+    'balloon tx ' + netDebug.txRate + '/s   rx ' + netDebug.rxRate + '/s\n' +
+    'last rx   ' + (age < 0 ? 'never' : age + 'ms ago') + '\n' +
+    'netHas    ' + balloonNet.has + '   frozen ' + balloonNet.frozen + '\n' +
+    'roundPause ' + roundPause.toFixed(2) + '   turn ' + lastToucher + '\n' +
+    'balloon y ' + balloon.position.y.toFixed(2);
+}
+
+addEventListener('keydown', e => {
+  if (e.code === 'F3') {
+    e.preventDefault();
+    netDebug.on = !netDebug.on;
+    netDebugEl.style.display = netDebug.on ? 'block' : 'none';
+  }
+});
+
 /* ---- Fixed-step driver: fed by rAF when visible, by a Worker timer when not ---- */
 let lastStep = performance.now();
 
@@ -2231,11 +2278,14 @@ requestAnimationFrame(loop);
   try {
     const src = 'let id=null; onmessage=e=>{ if(e.data==="start"&&!id){ id=setInterval(()=>postMessage(0),16); } else if(e.data==="stop"&&id){ clearInterval(id); id=null; } };';
     const worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'application/javascript' })));
-    worker.onmessage = () => { if (document.hidden) tick(); };
+    // Unconditional: tick() itself ignores calls that arrive too close together,
+    // so this is safe alongside rAF and covers every throttling case.
+    worker.onmessage = () => { tick(); };
     worker.postMessage('start');
+    netDebug.worker = true;
   } catch (err) {
-    // Worker blocked (rare) — fall back to a plain interval, throttled but better than nothing
-    setInterval(() => { if (document.hidden) tick(); }, 100);
+    setInterval(tick, 16);
+    netDebug.worker = false;
   }
 })();
 
