@@ -167,6 +167,11 @@
   .ctpIcon { font-size: 46px; }
   .ctpTitle { font-size: 26px; font-weight: 800; color: #ffd166; margin: 8px 0 10px; }
   .ctpSub { font-size: 16px; color: #c8c8dc; line-height: 1.6; }
+  #errBanner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 99; display: none;
+    background: #b3261e; color: #fff; font-size: 14px; font-family: monospace;
+    padding: 10px 16px; text-align: left; white-space: pre-wrap; max-height: 30vh; overflow: auto;
+  }
   #netMsg {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 9;
     background: rgba(20,20,30,0.85); color: #ffd166; font-size: 22px; font-weight: 700;
@@ -352,6 +357,7 @@
   <button class="menuBtn" id="endMainBtn">MAIN MENU</button>
 </div>
 
+<div id="errBanner"></div>
 <div id="netMsg"></div>
 <div id="clickToPlay" class="hidden">
   <div class="ctpBox">
@@ -365,6 +371,19 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 "use strict";
+
+/* Surface any runtime error on screen — silent failures are impossible to debug remotely */
+(function () {
+  const banner = document.getElementById('errBanner');
+  function show(msg) {
+    if (!banner) return;
+    banner.style.display = 'block';
+    banner.textContent = '⚠️ ' + msg;
+  }
+  window.addEventListener('error', e => show(e.message + '  (line ' + e.lineno + ')'));
+  window.addEventListener('unhandledrejection', e => show('Promise: ' + (e.reason && e.reason.message || e.reason)));
+  window.__gameError = show;
+})();
 
 /* ================= SETTINGS ================= */
 const ROOM = { w: 26, d: 20, h: 10 };
@@ -1606,7 +1625,8 @@ function connectSocket() {
 }
 
 function currentSettings() {
-  const diffKey = document.querySelector('.diffBtn.selected').dataset.diff;
+  const sel = document.querySelector('.diffBtn.selected');
+  const diffKey = sel ? sel.dataset.diff : 'normal';
   return {
     diff: diffKey,
     time: matchTime,
@@ -1690,8 +1710,22 @@ document.getElementById('confirmJoinBtn').onclick = doJoin;
 codeInput.addEventListener('keydown', e => { if (e.code === 'Enter') doJoin(); });
 
 startMatchBtn.onclick = () => {
-  socket.emit('updateSettings', currentSettings());
-  socket.emit('startMatch');
+  if (!socket || !socket.connected) {
+    hostStatus.textContent = '⚠️ Lost connection to the server — reload the page.';
+    return;
+  }
+  try {
+    socket.emit('updateSettings', currentSettings());
+    socket.emit('startMatch');
+    hostStatus.textContent = 'Starting…';
+    // If the server never answers, say so rather than hanging on this screen
+    setTimeout(() => {
+      if (!online) hostStatus.textContent = '⚠️ The server did not start the match. Is your friend still connected?';
+    }, 3000);
+  } catch (err) {
+    hostStatus.textContent = '⚠️ ' + err.message;
+    if (window.__gameError) window.__gameError(err.message);
+  }
 };
 
 /* Guest keeps its own colour when the host's settings arrive */
@@ -1703,6 +1737,7 @@ applyRemoteSettings = function (sv) {
 };
 
 function startOnlineMatch() {
+  try {
   online = true;
   mode = 'online';
   state = 'starting';
@@ -1714,6 +1749,10 @@ function startOnlineMatch() {
   startNewMatch();
   if (fallbackMode) beginPlaying();
   else requestLock();
+  } catch (err) {
+    if (window.__gameError) window.__gameError('startOnlineMatch: ' + err.message);
+    throw err;
+  }
 }
 
 /* Send my transform + receive/interpolate the opponent's */
