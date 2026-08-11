@@ -855,6 +855,7 @@ let lastToucher = 0;
 const balloonNet = { target: new THREE.Vector3(), quat: new THREE.Quaternion(), has: false, frozen: false, stamp: 0 };
 let lastTouchTime = 0;   // guards against late duplicate slap packets
 let restTimer = 0;       // how long the balloon has been parked on furniture
+let floorStuck = 0;      // watchdog: balloon lying on the floor with no round resolving
 
 function updateBalloonRemote(dt) {
   if (!balloonNet.has) return;
@@ -897,6 +898,7 @@ function resetBalloon() {
   balloon.quaternion.identity();
   lastToucher = 0;
   restTimer = 0;
+  floorStuck = 0;
   if (typeof balloonNet !== 'undefined') balloonNet.has = false;
   if (typeof updateTurnUI === 'function') updateTurnUI();
 }
@@ -1904,6 +1906,26 @@ function collideBalloonWithBox(box) {
 }
 
 /* Keeps the match alive: a balloon parked on furniture is drifted off its perch */
+function floorWatchdog(dt) {
+  if (online && !isHost) return;
+  const onFloor = balloon.position.y <= BALLOON_R * 1.12 + 0.06;
+  if (!onFloor || roundPause > 0) { floorStuck = 0; return; }
+  floorStuck += dt;
+  if (floorStuck > 1.0) {          // it should already have been resolved by now
+    floorStuck = 0;
+    if (mode === 'free') return;
+    if (lastToucher === 0) {
+      timeLeft = Math.max(0, timeLeft - 10);
+      roundMsgEl.textContent = 'Nobody touched it! ⏱️ -10s — new serve';
+      roundMsgEl.style.display = 'block';
+      roundPause = 1.2;
+      if (online && isHost && socket) socket.emit('event', { t: 'timer', timeLeft, sd: suddenDeath, msg: roundMsgEl.textContent });
+    } else {
+      pointScored(lastToucher);
+    }
+  }
+}
+
 function nudgeRestingBalloon(dt) {
   const speed = balloonVel.length();
   const onFloor = balloon.position.y <= BALLOON_R * 1.12 + 0.05;
@@ -1985,6 +2007,7 @@ function updateBalloon(dt) {
     collideBalloonWithBox(box);
   }
   nudgeRestingBalloon(dt);
+  floorWatchdog(dt);
   playerPushesBalloon(p1, 1);
   if (isDuel()) playerPushesBalloon(p2, 2);
 
@@ -2000,11 +2023,13 @@ function updateBalloon(dt) {
   const righting = new THREE.Vector3().crossVectors(up, new THREE.Vector3(0, 1, 0));
   balloonAngVel.addScaledVector(righting, 0.9 * dt * 3);
 
-  /* Floor */
-  if (balloon.position.y < r*1.12 && roundPause <= 0 && state === 'playing') {
+  /* Floor — must also fire while a menu is open online, since play continues */
+  const liveForScoring = (state === 'playing') || (online && state === 'paused');
+  if (balloon.position.y < r*1.12 && roundPause <= 0 && liveForScoring) {
     balloon.position.y = r*1.12;
 
     if (mode === 'free') {
+      if (state !== 'playing') return;
       fpBest = Math.max(fpBest, fpAirTime);
       endGame('🎈💥', 'The balloon touched the floor!<br>' +
         'You lasted <b>' + fpAirTime.toFixed(1) + 's</b> with <b>' + fpHits + '</b> slaps.<br>' +
