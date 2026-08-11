@@ -2147,11 +2147,13 @@ function stepGame(dt) {
     for (const pl of [p1, p2]) {
       if (pl.charging) pl.charge = Math.min(1, pl.charge + dt / CHARGE_TIME);
     }
-    chargeFill1.style.width = (p1.charge * 100) + '%';
+    // Online: bar 1 is MY bar whichever player I am. Local split-screen keeps 1=P1, 2=P2.
+    const bar1Player = online ? ((myNum === 2) ? p2 : p1) : p1;
+    chargeFill1.style.width = (bar1Player.charge * 100) + '%';
     chargeFill2.style.width = (p2.charge * 100) + '%';
 
     // Dash indicators: lightning when ready, countdown while cooling
-    [[p1, 'dash1'], [p2, 'dash2']].forEach(([pl, id]) => {
+    [[bar1Player, 'dash1'], [p2, 'dash2']].forEach(([pl, id]) => {
       const el = document.getElementById(id);
       if (pl.dashCd > 0) {
         el.textContent = Math.ceil(pl.dashCd);
@@ -2265,10 +2267,11 @@ if (location.search.indexOf('debug=1') !== -1) setDebug(true);
 /* ---- Fixed-step driver: fed by rAF when visible, by a Worker timer when not ---- */
 let lastStep = performance.now();
 
+const MIN_STEP = 1 / 120;               // cap the simulation at 120Hz
 function tick() {
   const now = performance.now();
   let dt = (now - lastStep) / 1000;
-  if (dt <= 0.001) return;               // another driver already stepped this instant
+  if (dt < MIN_STEP) return;             // another driver already stepped recently
   lastStep = now;
   if (dt > 0.1) dt = 0.1;                // don't let a long stall teleport the world
   stepGame(dt);
