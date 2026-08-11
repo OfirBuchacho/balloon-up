@@ -2245,14 +2245,22 @@ function updateNetDebug() {
     'balloon y ' + balloon.position.y.toFixed(2);
 }
 
-// Backquote (`) toggles diagnostics — F3 is taken by Chrome's find-in-page
+function setDebug(on) {
+  netDebug.on = on;
+  netDebugEl.style.display = on ? 'block' : 'none';
+  if (on) updateNetDebug();
+}
+
+/* Several triggers, because keyboard layouts and browser shortcuts vary:
+   ?debug=1 in the URL, the ` key, F9, or F2. */
 addEventListener('keydown', e => {
-  if (e.code === 'Backquote' || e.code === 'F9') {
+  if (e.code === 'Backquote' || e.code === 'F9' || e.code === 'F2' || e.key === '`') {
     e.preventDefault();
-    netDebug.on = !netDebug.on;
-    netDebugEl.style.display = netDebug.on ? 'block' : 'none';
+    setDebug(!netDebug.on);
   }
 });
+
+if (location.search.indexOf('debug=1') !== -1) setDebug(true);
 
 /* ---- Fixed-step driver: fed by rAF when visible, by a Worker timer when not ---- */
 let lastStep = performance.now();
@@ -2270,6 +2278,7 @@ function loop() {
   requestAnimationFrame(loop);
   tick();
   renderFrame();
+  if (netDebug.on) updateNetDebug();
 }
 requestAnimationFrame(loop);
 
