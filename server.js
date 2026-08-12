@@ -141,6 +141,9 @@ io.on("connection", (socket) => {
     if (room) socket.to(room.code).emit("event", data);
   });
 
+  /* Latency probe for the in-game diagnostics panel */
+  socket.on("ping2", (_d, cb) => { if (typeof cb === "function") cb(); });
+
   socket.on("disconnecting", () => {
     for (const code of socket.rooms) {
       const room = rooms[code];

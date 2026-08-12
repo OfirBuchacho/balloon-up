@@ -392,7 +392,7 @@
 })();
 
 /* Diagnostics — press F3 in game to see what the network is actually doing */
-const netDebug = { on: false, worker: false, rx: 0, tx: 0, rxRate: 0, txRate: 0,
+const netDebug = { on: false, worker: false, ping: -1, rx: 0, tx: 0, rxRate: 0, txRate: 0,
                    lastRx: 0, steps: 0, stepRate: 0, frames: 0, fps: 0, since: 0 };
 
 /* ================= SETTINGS ================= */
@@ -433,7 +433,8 @@ let myNum = 1;               // 1 or 2 — which player I control
 let roomCode = '';
 let myPrevId = null;      // previous socket id, used to reclaim a slot after a reconnect
 let netSendTimer = 0;
-const NET_RATE = 1/20;       // 20Hz
+const NET_RATE = 1/30;       // 30Hz player updates (smoother over the internet)
+const INTERP_DELAY = 50;     // ms: render the opponent slightly in the past (tuned)
 
 /* Duel = any mode with two players (local split-screen or online) */
 function isDuel() { return mode === '1v1' || mode === 'online'; }
@@ -853,7 +854,7 @@ const balloonAngVel = new THREE.Vector3();
 let lastToucher = 0;
 
 /* Guest-side smoothing: predict locally, then ease toward the host's authoritative position */
-const balloonNet = { target: new THREE.Vector3(), quat: new THREE.Quaternion(), has: false, frozen: false, stamp: 0 };
+const balloonNet = { target: new THREE.Vector3(), quat: new THREE.Quaternion(), has: false, frozen: false, stamp: 0, predictedUntil: 0 };
 let lastTouchTime = 0;   // guards against late duplicate slap packets
 let restTimer = 0;       // how long the balloon has been parked on furniture
 let floorStuck = 0;      // watchdog: balloon lying on the floor with no round resolving
@@ -866,9 +867,13 @@ function updateBalloonRemote(dt) {
     balloon.position.addScaledVector(balloonVel, dt);
     balloonNet.target.addScaledVector(balloonVel, dt);
   }
-  // Correct: ease onto the host's position instead of snapping to it
-  balloon.position.lerp(balloonNet.target, Math.min(1, dt * 9));
-  balloon.quaternion.slerp(balloonNet.quat, Math.min(1, dt * 9));
+  // Correct: ease onto the host's position instead of snapping to it.
+  // Right after our own predicted slap the host's packets are still "pre-hit",
+  // so we correct much more softly for a moment to avoid a visible snap-back.
+  const predicting = performance.now() < (balloonNet.predictedUntil || 0);
+  const k = predicting ? 1.5 : 9;
+  balloon.position.lerp(balloonNet.target, Math.min(1, dt * k));
+  balloon.quaternion.slerp(balloonNet.quat, Math.min(1, dt * k));
 
   // Keep the predicted balloon out of geometry — otherwise it visually sinks into the sofa
   const r = BALLOON_R;
@@ -1062,6 +1067,14 @@ function releaseSlap(pl, cam) {
     lastToucher = myNum;        // optimistic: my turn is over the moment I swing
     updateTurnUI();
     socket.emit('event', { t: 'slapReq', power, dx: dir.x, dy: dir.y, dz: dir.z, by: myNum });
+
+    // Predict the hit locally so it feels instant. The host is still authoritative —
+    // its next packet corrects us — but without this the balloon only reacts a full
+    // round trip later, which is what reads as lag.
+    const predicted = dir.clone().multiplyScalar(SLAP_POWER * 0.75 * power);
+    predicted.y += SLAP_POWER * 0.7 * power;
+    balloonVel.add(predicted);
+    balloonNet.predictedUntil = performance.now() + 260;   // trust our own prediction briefly
     return;
   }
   const power = POWER_MIN + (POWER_MAX - POWER_MIN) * pl.charge;
@@ -1621,10 +1634,13 @@ function connectSocket() {
     }
   });
 
-  /* Remote player transform */
+  /* Remote player transform — buffered for interpolation */
   socket.on('state', d => {
     const rp = (myNum === 1) ? p2 : p1;
     rp.netTarget = d;
+    rp.snaps = rp.snaps || [];
+    rp.snaps.push({ t: performance.now(), d });
+    if (rp.snaps.length > 20) rp.snaps.shift();
   });
 
   /* Balloon from host — stored as a target, then smoothly corrected (see updateBalloonRemote) */
@@ -1827,6 +1843,11 @@ function netTick(dt) {
       x: mine.pos.x, y: mine.pos.y, z: mine.pos.z,
       yaw: mine.yaw, mv: mine.moving ? 1 : 0, ch: mine.charging ? mine.charge : -1
     });
+    if (netDebug.on && performance.now() - (netDebug.lastPing || 0) > 1000) {
+      netDebug.lastPing = performance.now();
+      const sent = performance.now();
+      socket.emit('ping2', null, () => { netDebug.ping = Math.round(performance.now() - sent); });
+    }
     if (isHost) {
       netDebug.tx++;
       const frozen = roundPause > 0;
@@ -1840,22 +1861,48 @@ function netTick(dt) {
       socket.emit('event', { t: 'timer', timeLeft, sd: suddenDeath });
     }
   }
-  // Smooth the remote player toward its last known transform
+  // Interpolate the opponent between buffered snapshots, rendered slightly in the
+  // past. This trades ~90ms of freshness for motion with no judder.
   const rp = (myNum === 1) ? p2 : p1;
-  if (rp.netTarget) {
-    const t = Math.min(1, dt * 14);
-    rp.pos.x += (rp.netTarget.x - rp.pos.x) * t;
-    rp.pos.y += (rp.netTarget.y - rp.pos.y) * t;
-    rp.pos.z += (rp.netTarget.z - rp.pos.z) * t;
-    let dy = rp.netTarget.yaw - rp.yaw;
-    while (dy > Math.PI) dy -= Math.PI*2;
-    while (dy < -Math.PI) dy += Math.PI*2;
-    rp.yaw += dy * t;
-    rp.moving = !!rp.netTarget.mv;
-    rp.charging = rp.netTarget.ch >= 0;
-    rp.charge = Math.max(0, rp.netTarget.ch);
+  const snaps = rp.snaps;
+  if (snaps && snaps.length) {
+    const renderAt = performance.now() - INTERP_DELAY;
+    let a = null, b = null;
+    for (let i = snaps.length - 1; i >= 0; i--) {
+      if (snaps[i].t <= renderAt) { a = snaps[i]; b = snaps[i + 1] || null; break; }
+    }
+    let target, blend = 0;
+    if (a && b) {
+      blend = (renderAt - a.t) / Math.max(1, b.t - a.t);
+      target = {
+        x: a.d.x + (b.d.x - a.d.x) * blend,
+        y: a.d.y + (b.d.y - a.d.y) * blend,
+        z: a.d.z + (b.d.z - a.d.z) * blend,
+        yaw: a.d.yaw, mv: b.d.mv, ch: b.d.ch
+      };
+      let dy = b.d.yaw - a.d.yaw;
+      while (dy > Math.PI) dy -= Math.PI*2;
+      while (dy < -Math.PI) dy += Math.PI*2;
+      target.yaw = a.d.yaw + dy * blend;
+    } else {
+      target = (a || snaps[snaps.length - 1]).d;      // no pair yet: latest known
+    }
+
+    const t = Math.min(1, dt * 22);                    // final smoothing (tuned)
+    rp.pos.x += (target.x - rp.pos.x) * t;
+    rp.pos.y += (target.y - rp.pos.y) * t;
+    rp.pos.z += (target.z - rp.pos.z) * t;
+    let dyaw = target.yaw - rp.yaw;
+    while (dyaw > Math.PI) dyaw -= Math.PI*2;
+    while (dyaw < -Math.PI) dyaw += Math.PI*2;
+    rp.yaw += dyaw * t;
+    rp.moving = !!target.mv;
+    rp.charging = target.ch >= 0;
+    rp.charge = Math.max(0, target.ch);
     rp.body.position.set(rp.pos.x, rp.pos.y, rp.pos.z);
     rp.body.rotation.y = rp.yaw;
+
+    while (snaps.length > 2 && snaps[1].t < renderAt) snaps.shift();
   }
 }
 /* ================= SCORING ================= */
@@ -2352,6 +2399,7 @@ function updateNetDebug() {
     'worker    ' + (netDebug.worker ? 'yes' : 'no') + '\n' +
     'fps       ' + netDebug.fps + '   sim/s ' + netDebug.stepRate + '\n' +
     'balloon tx ' + netDebug.txRate + '/s   rx ' + netDebug.rxRate + '/s\n' +
+    'ping      ' + (netDebug.ping >= 0 ? netDebug.ping + 'ms' : '—') + '\n' +
     'last rx   ' + (age < 0 ? 'never' : age + 'ms ago') + '\n' +
     'netHas    ' + balloonNet.has + '   frozen ' + balloonNet.frozen + '\n' +
     'roundPause ' + roundPause.toFixed(2) + '   turn ' + lastToucher + '\n' +
