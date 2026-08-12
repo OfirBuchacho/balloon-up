@@ -431,6 +431,7 @@ let online = false;          // true while in an online match
 let isHost = false;          // host runs balloon physics
 let myNum = 1;               // 1 or 2 — which player I control
 let roomCode = '';
+let myPrevId = null;      // previous socket id, used to reclaim a slot after a reconnect
 let netSendTimer = 0;
 const NET_RATE = 1/20;       // 20Hz
 
@@ -1574,7 +1575,23 @@ function connectSocket() {
     return;
   }
   socket = io();
-  socket.on('connect', () => { connStatus.textContent = '✅ Connected to server'; });
+  socket.on('connect', () => {
+    connStatus.textContent = '✅ Connected to server';
+    // Reconnected mid-session? Reclaim our slot, otherwise the server no longer
+    // recognises us and START MATCH (and all relays) silently stop working.
+    if (roomCode && myPrevId && myPrevId !== socket.id) {
+      socket.emit('rejoinRoom', { code: roomCode, num: myNum, oldId: myPrevId }, res => {
+        if (res && res.ok) {
+          myNum = res.you;
+          isHost = (myNum === 1);
+          if (!online && res.started) startOnlineMatch();
+        } else if (state === 'playing' || state === 'paused') {
+          showNetMsg('Lost the room — returning to the menu', 2500);
+        }
+      });
+    }
+    myPrevId = socket.id;
+  });
   socket.on('disconnect', () => {
     connStatus.textContent = '⚠️ Disconnected from server';
     if (online && state === 'playing') {
@@ -1758,18 +1775,18 @@ startMatchBtn.onclick = () => {
     hostStatus.textContent = '⚠️ Lost connection to the server — reload the page.';
     return;
   }
-  try {
-    socket.emit('updateSettings', currentSettings());
-    socket.emit('startMatch');
-    hostStatus.textContent = 'Starting…';
-    // If the server never answers, say so rather than hanging on this screen
-    setTimeout(() => {
-      if (!online) hostStatus.textContent = '⚠️ The server did not start the match. Is your friend still connected?';
-    }, 3000);
-  } catch (err) {
-    hostStatus.textContent = '⚠️ ' + err.message;
-    if (window.__gameError) window.__gameError(err.message);
-  }
+  socket.emit('updateSettings', currentSettings());
+  hostStatus.textContent = 'Starting…';
+  let answered = false;
+  socket.emit('startMatch', null, res => {
+    answered = true;
+    if (res && !res.ok) hostStatus.textContent = '⚠️ ' + res.error;
+  });
+  setTimeout(() => {
+    if (!answered && !online) {
+      hostStatus.textContent = '⚠️ No answer from the server — press START MATCH again.';
+    }
+  }, 4000);
 };
 
 /* Guest keeps its own colour when the host's settings arrive */
