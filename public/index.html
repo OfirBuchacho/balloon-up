@@ -1846,7 +1846,11 @@ function netTick(dt) {
     if (netDebug.on && performance.now() - (netDebug.lastPing || 0) > 1000) {
       netDebug.lastPing = performance.now();
       const sent = performance.now();
-      socket.emit('ping2', null, () => { netDebug.ping = Math.round(performance.now() - sent); });
+      const wasHidden = document.hidden;
+      socket.emit('ping2', null, () => {
+        netDebug.ping = Math.round(performance.now() - sent);
+        netDebug.pingHidden = wasHidden || document.hidden;
+      });
     }
     if (isHost) {
       netDebug.tx++;
@@ -2345,7 +2349,6 @@ function stepGame(dt) {
 /* Rendering stays on requestAnimationFrame — no point drawing a hidden window */
 function renderFrame() {
   netDebug.frames++;
-  updateNetDebug();
   const w = innerWidth, h = innerHeight;
 
   if (online) {
@@ -2399,8 +2402,10 @@ function updateNetDebug() {
     'worker    ' + (netDebug.worker ? 'yes' : 'no') + '\n' +
     'fps       ' + netDebug.fps + '   sim/s ' + netDebug.stepRate + '\n' +
     'balloon tx ' + netDebug.txRate + '/s   rx ' + netDebug.rxRate + '/s\n' +
-    'ping      ' + (netDebug.ping >= 0 ? netDebug.ping + 'ms' : '—') + '\n' +
-    'last rx   ' + (age < 0 ? 'never' : age + 'ms ago') + '\n' +
+    'ping      ' + (netDebug.ping >= 0 ? netDebug.ping + 'ms' : '—') +
+      (netDebug.pingHidden ? ' (measured in background - unreliable)' : '') + '\n' +
+    'window    ' + (document.hidden ? 'BACKGROUND (browser throttles this tab)' : 'focused') + '\n' +
+    'last rx   ' + (state === 'ended' ? 'match over' : (age < 0 ? 'never' : age + 'ms ago')) + '\n' +
     'netHas    ' + balloonNet.has + '   frozen ' + balloonNet.frozen + '\n' +
     'roundPause ' + roundPause.toFixed(2) + '   turn ' + lastToucher + '\n' +
     'balloon y ' + balloon.position.y.toFixed(2);
@@ -2434,6 +2439,7 @@ function tick() {
   lastStep = now;
   if (dt > 0.1) dt = 0.1;                // don't let a long stall teleport the world
   stepGame(dt);
+  if (netDebug.on) updateNetDebug();     // keeps the panel truthful in a background window
 }
 
 function loop() {
