@@ -51,7 +51,7 @@ function roomOf(socket) {
 
 function playerList(room) {
   return Object.entries(room.players).map(([id, p]) => ({
-    id, name: p.name, color: p.color, num: p.num
+    id, name: p.name, color: p.color, num: p.num, team: p.team
   }));
 }
 
@@ -65,7 +65,8 @@ io.on("connection", (socket) => {
       code,
       hostId: socket.id,
       settings: settings || {},
-      players: { [socket.id]: { name: name || "Player 1", color: color || 0, num: 1 } },
+      maxPlayers: (settings && settings.mode === "2v2") ? 4 : 2,
+      players: { [socket.id]: { name: name || "Player 1", color: color || 0, num: 1, team: 1 } },
       started: false
     };
     socket.join(code);
@@ -74,19 +75,56 @@ io.on("connection", (socket) => {
   });
 
   /* Guest joins with a code */
-  socket.on("joinRoom", ({ code, name, color }, cb) => {
+  socket.on("joinRoom", ({ code, name, color, team }, cb) => {
     code = (code || "").toUpperCase().trim();
     const room = rooms[code];
     if (!room) return cb({ ok: false, error: "Room not found" });
-    if (Object.keys(room.players).length >= 2)
-      return cb({ ok: false, error: "Room is full" });
+    const taken = Object.values(room.players).map(p => p.num);
+    if (taken.length >= room.maxPlayers) return cb({ ok: false, error: "Room is full" });
     if (room.started) return cb({ ok: false, error: "Match already started" });
 
-    room.players[socket.id] = { name: name || "Player 2", color: color ?? 1, num: 2 };
+    // Lowest free slot number
+    let num = 2;
+    while (taken.includes(num)) num++;
+
+    room.players[socket.id] = {
+      name: name || ("Player " + num),
+      color: color ?? (num - 1),
+      num,
+      team: team || (num % 2 === 1 ? 1 : 2)
+    };
     socket.join(code);
-    cb({ ok: true, code, you: 2, settings: room.settings });
+    cb({ ok: true, code, you: num, settings: room.settings, players: playerList(room) });
     io.to(code).emit("roomUpdate", { players: playerList(room), settings: room.settings });
-    console.log("player joined:", code);
+    console.log("player joined:", code, "as", num);
+  });
+
+  /* A player picks their team in the lobby */
+  socket.on("setTeam", ({ team }) => {
+    const room = roomOf(socket);
+    if (!room || room.started) return;
+    const me = room.players[socket.id];
+    if (!me || (team !== 1 && team !== 2)) return;
+    me.team = team;
+    io.to(room.code).emit("roomUpdate", { players: playerList(room), settings: room.settings });
+  });
+
+  /* A player picks their colour in the lobby */
+  socket.on("setColor", ({ color }) => {
+    const room = roomOf(socket);
+    if (!room) return;
+    const me = room.players[socket.id];
+    if (!me) return;
+    me.color = color;
+    io.to(room.code).emit("roomUpdate", { players: playerList(room), settings: room.settings });
+  });
+
+  /* A player picks their team in the lobby */
+  socket.on("setTeam", ({ team }) => {
+    const room = roomOf(socket);
+    if (!room || !room.players[socket.id]) return;
+    room.players[socket.id].team = (team === 2) ? 2 : 1;
+    io.to(room.code).emit("roomUpdate", { players: playerList(room), settings: room.settings });
   });
 
   /* Host can change settings in the lobby */
@@ -94,7 +132,8 @@ io.on("connection", (socket) => {
     const room = roomOf(socket);
     if (!room || room.hostId !== socket.id) return;
     room.settings = settings;
-    socket.to(room.code).emit("roomUpdate", { players: playerList(room), settings });
+    room.maxPlayers = (settings && settings.mode === "2v2") ? 4 : 2;
+    io.to(room.code).emit("roomUpdate", { players: playerList(room), settings });
   });
 
   /* Host starts the match */
@@ -103,9 +142,20 @@ io.on("connection", (socket) => {
     const room = roomOf(socket);
     if (!room) return ack({ ok: false, error: "You are no longer in a room — go back and create a new one." });
     if (room.hostId !== socket.id) return ack({ ok: false, error: "Only the host can start the match." });
-    if (Object.keys(room.players).length < 2) return ack({ ok: false, error: "Waiting for a second player." });
+    const list = playerList(room);
+    const need = room.maxPlayers;
+    if (list.length < need) {
+      return ack({ ok: false, error: `Waiting for players (${list.length}/${need}).` });
+    }
+    if (need === 4) {
+      const t1 = list.filter(p => p.team === 1).length;
+      const t2 = list.filter(p => p.team === 2).length;
+      if (t1 !== 2 || t2 !== 2) {
+        return ack({ ok: false, error: `Teams must be 2 v 2 (currently ${t1} v ${t2}).` });
+      }
+    }
     room.started = true;
-    io.to(room.code).emit("matchStarted", { settings: room.settings });
+    io.to(room.code).emit("matchStarted", { settings: room.settings, players: list });
     console.log("match started:", room.code);
     ack({ ok: true });
   });

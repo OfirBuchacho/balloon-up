@@ -261,6 +261,11 @@
   <!-- STEP 2b: online role -->
   <div id="onlineStep" class="hidden">
     <div id="connStatus" class="lobbyNote">Connecting to server…</div>
+    <div class="settingRow" id="formatRow">
+      <span class="settingLabel">Format:</span>
+      <button class="pill fmtBtn selected" data-fmt="1v1">1 vs 1</button>
+      <button class="pill fmtBtn" data-fmt="2v2">2 vs 2 👥</button>
+    </div>
     <div class="modeCards">
       <div class="modeCard" id="hostCard">
         <div class="icon">👑</div>
@@ -324,6 +329,12 @@
     <div id="roomCode">----</div>
     <button class="menuBtn" id="copyCodeBtn" style="width:200px; font-size:17px; padding:9px 0">📋 COPY CODE</button>
     <div id="hostStatus" class="lobbyNote">Waiting for a player to join…</div>
+    <div id="teamPick" class="settingRow hidden" style="justify-content:center">
+      <span class="settingLabel">Your team:</span>
+      <button class="pill teamBtn selected" data-team="1">TEAM 1 🔵</button>
+      <button class="pill teamBtn" data-team="2">TEAM 2 🔴</button>
+    </div>
+    <div id="roster" class="lobbyNote"></div>
     <button class="menuBtn primary hidden" id="startMatchBtn">START MATCH</button>
     <button class="menuBtn" id="hostCancelBtn">CANCEL</button>
   </div>
@@ -341,6 +352,12 @@
   <div id="lobbyWaiting" class="hidden">
     <div id="waitCode" class="lobbyNote"></div>
     <div class="lobbyNote">✅ Connected! Waiting for the host to start the match…</div>
+    <div id="teamPickGuest" class="settingRow hidden" style="justify-content:center">
+      <span class="settingLabel">Your team:</span>
+      <button class="pill teamBtnG selected" data-team="1">TEAM 1 🔵</button>
+      <button class="pill teamBtnG" data-team="2">TEAM 2 🔴</button>
+    </div>
+    <div id="rosterGuest" class="lobbyNote"></div>
     <button class="menuBtn" id="waitCancelBtn">LEAVE</button>
   </div>
 </div>
@@ -423,6 +440,7 @@ let matchTime = 180;
 /* Game state: 'menu' | 'playing' | 'paused' | 'ended' */
 let state = 'menu';
 let mode = 'free';           // 'free' | '1v1' | 'online'
+let matchMode = '1v1';       // '1v1' | '2v2' — the online match format
 let fallbackMode = false;    // no pointer lock available (e.g. sandboxed preview)
 
 /* Online */
@@ -432,6 +450,7 @@ let isHost = false;          // host runs balloon physics
 let myNum = 1;               // 1 or 2 — which player I control
 let roomCode = '';
 let myPrevId = null;      // previous socket id, used to reclaim a slot after a reconnect
+let halfRTT = 0;          // smoothed one-way latency (ms), used to compensate stale packets
 let netSendTimer = 0;
 const NET_RATE = 1/30;       // 30Hz player updates (smoother over the internet)
 const INTERP_DELAY = 50;     // ms: render the opponent slightly in the past (tuned)
@@ -856,6 +875,16 @@ let lastToucher = 0;
 /* Guest-side smoothing: predict locally, then ease toward the host's authoritative position */
 const balloonNet = { target: new THREE.Vector3(), quat: new THREE.Quaternion(), has: false, frozen: false, stamp: 0, predictedUntil: 0 };
 let lastTouchTime = 0;   // guards against late duplicate slap packets
+
+/* 2v2 rally bookkeeping */
+const MAX_TEAM_TOUCHES = 3;
+const SPIKE_WINDOW = 0.6;      // s — landing sooner than this after a slap is a spike
+let teamTouches = 0;           // consecutive slaps by the team currently holding the balloon
+let lastTeam = 0;
+let lastSlapAt = -99;          // performance.now()/1000 of the last slap
+function teamOf(num) { const p = playerByNum(num); return p ? p.team : 0; }
+function otherTeam(t) { return t === 1 ? 2 : 1; }
+function isTeamMode() { return matchMode === '2v2'; }
 let restTimer = 0;       // how long the balloon has been parked on furniture
 let floorStuck = 0;      // watchdog: balloon lying on the floor with no round resolving
 
@@ -903,6 +932,9 @@ function resetBalloon() {
   balloonAngVel.set(0, 0, 0);
   balloon.quaternion.identity();
   lastToucher = 0;
+  teamTouches = 0;
+  lastTeam = 0;
+  lastSlapAt = -99;
   restTimer = 0;
   floorStuck = 0;
   if (typeof balloonNet !== 'undefined') balloonNet.has = false;
@@ -967,18 +999,39 @@ function makeBody(color) {
   return g;
 }
 
-const p1 = {
-  pos: new THREE.Vector3( 6, 0, 3), vy: 0, onGround: true,
-  yaw: -Math.PI/2, pitch: 0, slapTimer: 0, punchAnim: 0,
-  charging: false, charge: 0, dashTimer: 0, dashCd: 0,
-  body: makeBody(0x4668b5)
-};
-const p2 = {
-  pos: new THREE.Vector3(-6, 0, 3), vy: 0, onGround: true,
-  yaw:  Math.PI/2, pitch: 0, slapTimer: 0, punchAnim: 0,
-  charging: false, charge: 0, dashTimer: 0, dashCd: 0,
-  body: makeBody(0xd97b2f)
-};
+/* Up to four players. players[0..3] are slots 1..4; p1/p2 stay as aliases so all
+   the existing 1v1 and local code keeps working unchanged. */
+const SPAWNS = [
+  { x:  6, z:  3, yaw: -Math.PI/2 },
+  { x: -6, z:  3, yaw:  Math.PI/2 },
+  { x:  9, z: -3, yaw: -Math.PI/2 },
+  { x: -9, z: -3, yaw:  Math.PI/2 }
+];
+
+function makePlayer(slot, color) {
+  const sp = SPAWNS[slot];
+  return {
+    num: slot + 1,
+    team: (slot % 2 === 0) ? 1 : 2,
+    pos: new THREE.Vector3(sp.x, 0, sp.z), vy: 0, onGround: true,
+    yaw: sp.yaw, pitch: 0, slapTimer: 0, punchAnim: 0,
+    charging: false, charge: 0, dashTimer: 0, dashCd: 0,
+    active: slot < 2,
+    body: makeBody(color)
+  };
+}
+
+const players = [
+  makePlayer(0, 0x4668b5),
+  makePlayer(1, 0xd97b2f),
+  makePlayer(2, 0x3f9d5c),
+  makePlayer(3, 0xc0392b)
+];
+const p1 = players[0];
+const p2 = players[1];
+
+function activePlayers() { return players.filter(p => p.active); }
+function playerByNum(n) { return players[n - 1]; }
 
 function tryDash(pl) {
   if (pl.dashCd > 0) return;
@@ -1009,8 +1062,8 @@ addEventListener('keyup', e => {
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 document.addEventListener('visibilitychange', () => { for (const k in keys) keys[k] = false; });
 
-function myPlayer() { return (online && myNum === 2) ? p2 : p1; }
-function myCamera() { return (online && myNum === 2) ? camera2 : camera1; }
+function myPlayer() { return online ? (playerByNum(myNum) || p1) : p1; }
+function myCamera() { return (online && myNum !== 1) ? camera2 : camera1; }
 
 addEventListener('mousemove', e => {
   if (state !== 'playing') return;
@@ -1064,8 +1117,7 @@ function releaseSlap(pl, cam) {
     if (toBalloon.normalize().dot(dir) < 0.55) return;
     pl.slapTimer = SLAP_COOLDOWN;
     pl.punchAnim = 0.18;
-    lastToucher = myNum;        // optimistic: my turn is over the moment I swing
-    updateTurnUI();
+    registerTouch(myNum);      // optimistic: the host confirms with its next packet
     socket.emit('event', { t: 'slapReq', power, dx: dir.x, dy: dir.y, dz: dir.z, by: myNum });
 
     // Predict the hit locally so it feels instant. The host is still authoritative —
@@ -1129,15 +1181,46 @@ function releaseSlap(pl, cam) {
   pl.punchAnim = 0.18;
 }
 
+/* The rulebook for a slap. Returns null when it's legal, or a foul description.
+   Shared by local slaps and slaps relayed from other players. */
+function checkSlapLegality(byNum) {
+  if (lastToucher === byNum) {
+    return { pointTo: isTeamMode() ? otherTeam(teamOf(byNum)) : (byNum === 1 ? 2 : 1),
+             msg: 'Double touch by Player ' + byNum + '!' };
+  }
+  if (isTeamMode()) {
+    const team = teamOf(byNum);
+    if (team === lastTeam && teamTouches >= MAX_TEAM_TOUCHES) {
+      return { pointTo: otherTeam(team),
+               msg: 'Four touches by team ' + team + '! Point for team ' + otherTeam(team) };
+    }
+  }
+  return null;
+}
+
+/* Records a legal touch */
+function registerTouch(byNum) {
+  const team = teamOf(byNum);
+  if (isTeamMode()) {
+    if (team === lastTeam) teamTouches++;
+    else { lastTeam = team; teamTouches = 1; }
+  }
+  lastToucher = byNum;
+  lastTouchTime = performance.now();
+  lastSlapAt = performance.now() / 1000;
+  updateTurnUI();
+}
+
 /* Host applies a slap requested by the remote guest */
 function applyRemoteSlap(d) {
-  const pl = (d.by === 1) ? p1 : p2;
+  const pl = playerByNum(d.by) || p2;
   pl.punchAnim = 0.18;
 
-  if (lastToucher === d.by) {
-    // Within 400ms it's almost certainly a late/duplicate packet, not a real second hit
-    if (performance.now() - lastTouchTime < 400) return;
-    pointScored(d.by === 1 ? 2 : 1, 'Double touch by Player ' + d.by + '! Point for Player ' + (d.by === 1 ? 2 : 1));
+  const foul = checkSlapLegality(d.by);
+  if (foul) {
+    // Within 400ms a repeat is almost certainly a duplicate packet, not a real second hit
+    if (lastToucher === d.by && performance.now() - lastTouchTime < 400) return;
+    pointScored(foul.pointTo, foul.msg);
     return;
   }
 
@@ -1150,9 +1233,7 @@ function applyRemoteSlap(d) {
   balloonAngVel.x += (Math.random()-0.5) * 6 * d.power;
   balloonAngVel.y += (Math.random()-0.5) * 6 * d.power;
   balloonAngVel.z += (Math.random()-0.5) * 6 * d.power;
-  lastToucher = d.by;
-  lastTouchTime = performance.now();
-  updateTurnUI();
+  registerTouch(d.by);
 }
 
 /* Turn indicator: glow the name of the player who must hit next */
@@ -1193,6 +1274,45 @@ function formatTime(t) {
 }
 
 /* ================= MENU LOGIC ================= */
+/* ---------- Format (1v1 / 2v2) and team pickers ---------- */
+let myTeam = 1;
+
+function wireFormatButtons() {
+  document.querySelectorAll('.fmtBtn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.fmtBtn').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      matchMode = btn.dataset.fmt;
+    });
+  });
+  ['teamBtn', 'teamBtnG'].forEach(cls => {
+    document.querySelectorAll('.' + cls).forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.' + cls).forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        myTeam = parseInt(btn.dataset.team, 10);
+        if (socket) socket.emit('setTeam', { team: myTeam });
+      });
+    });
+  });
+}
+
+/* Show who's in the room and which team they picked */
+function renderRoster(list) {
+  if (!list) return;
+  const line = t => list.filter(p => (p.team || 1) === t)
+                        .map(p => 'P' + p.num).join(', ') || '—';
+  const txt = isTeamMode()
+    ? 'TEAM 1: ' + line(1) + '   |   TEAM 2: ' + line(2) + '   (' + list.length + '/4)'
+    : list.length + '/2 players';
+  const a = document.getElementById('roster');
+  const b = document.getElementById('rosterGuest');
+  if (a) a.textContent = txt;
+  if (b) b.textContent = txt;
+  document.getElementById('teamPick').classList.toggle('hidden', !isTeamMode());
+  document.getElementById('teamPickGuest').classList.toggle('hidden', !isTeamMode());
+}
+
 /* ---------- Main menu navigation: home -> place -> settings -> play ---------- */
 let menuStep = 'home';        // 'home' | 'local' | 'online' | 'hostSetup' | 'guestSetup'
 let onlineRole = null;        // 'host' | 'guest'
@@ -1366,6 +1486,7 @@ function applyColors() {
 })();
 
 applyColors();
+wireFormatButtons();
 // Start on the home step (LOCAL / ONLINE)
 document.getElementById('timeRow').classList.add('hidden');
 document.getElementById('colorRow2').classList.add('hidden');
@@ -1614,16 +1735,41 @@ function connectSocket() {
   });
 
   socket.on('roomUpdate', d => {
-    if (isHost && d.players.length === 2) {
-      hostStatus.textContent = '✅ A player joined! Ready when you are.';
-      startMatchBtn.classList.remove('hidden');
+    renderRoster(d.players);
+    if (!isHost) return;
+    const need = isTeamMode() ? 4 : 2;
+    if (d.players.length >= need) {
+      const t1 = d.players.filter(p => (p.team || 1) === 1).length;
+      const balanced = !isTeamMode() || t1 === 2;
+      hostStatus.textContent = balanced
+        ? '✅ Everyone is here! Ready when you are.'
+        : '⚠️ Teams are uneven — you need 2 vs 2.';
+      startMatchBtn.classList.toggle('hidden', !balanced);
+    } else {
+      hostStatus.textContent = 'Waiting for players… (' + d.players.length + '/' + need + ')';
+      startMatchBtn.classList.add('hidden');
     }
   });
 
   socket.on('matchStarted', d => {
     if (d && d.settings) applyRemoteSettings(d.settings);
+    if (d && d.players) applyRoster(d.players);
     startOnlineMatch();
   });
+
+  /* The server is the source of truth for who sits in which slot and team */
+  function applyRoster(list) {
+    players.forEach(pl => { pl.active = false; });
+    list.forEach(info => {
+      const pl = playerByNum(info.num);
+      if (!pl) return;
+      pl.active = true;
+      pl.team = info.team || 1;
+      if (typeof info.color === 'number' && PALETTE[info.color]) {
+        pl.body.userData.colorMat.color.setHex(PALETTE[info.color].hex);
+      }
+    });
+  }
 
   socket.on('peerLeft', () => {
     if (online && state === 'playing') {
@@ -1634,9 +1780,11 @@ function connectSocket() {
     }
   });
 
-  /* Remote player transform — buffered for interpolation */
+  /* Remote player transforms — buffered per slot for interpolation */
   socket.on('state', d => {
-    const rp = (myNum === 1) ? p2 : p1;
+    const rp = playerByNum(d.n || (myNum === 1 ? 2 : 1));
+    if (!rp || rp.num === myNum) return;
+    rp.active = true;
     rp.netTarget = d;
     rp.snaps = rp.snaps || [];
     rp.snaps.push({ t: performance.now(), d });
@@ -1649,6 +1797,14 @@ function connectSocket() {
     balloonNet.target.set(d.px, d.py, d.pz);
     balloonNet.quat.set(d.qx, d.qy, d.qz, d.qw);
     balloonVel.set(d.vx, d.vy, d.vz);           // used for local prediction between updates
+    // This snapshot is already one trip old. Advance it so we aim at where the
+    // balloon is NOW, not where it was — on a 230ms link that is a big difference.
+    if (!d.f && halfRTT > 0) {
+      const lead = Math.min(halfRTT / 1000, 0.25);
+      balloonNet.target.addScaledVector(balloonVel, lead);
+      balloonNet.target.y = Math.max(BALLOON_R * 1.12,
+                            Math.min(ROOM.h - BALLOON_R * 1.12, balloonNet.target.y));
+    }
     balloonNet.has = true;
     balloonNet.frozen = !!d.f;                  // host paused the round — stop predicting
     balloonNet.stamp = performance.now();
@@ -1668,8 +1824,8 @@ function connectSocket() {
   /* Game events */
   socket.on('event', d => {
     if (d.t === 'slapAnim') {
-      const rp = (myNum === 1) ? p2 : p1;
-      rp.punchAnim = 0.18;
+      const rp = playerByNum(d.by) || ((myNum === 1) ? p2 : p1);
+      if (rp && rp.num !== myNum) rp.punchAnim = 0.18;
     } else if (d.t === 'slapReq' && isHost) {
       applyRemoteSlap(d);
     } else if (d.t === 'guestColor' && isHost) {
@@ -1708,7 +1864,9 @@ function currentSettings() {
     diff: diffKey,
     time: matchTime,
     hostColor: playerColorIdx[0],
-    guestColor: playerColorIdx[1]
+    guestColor: playerColorIdx[1],
+    teamMode: matchMode === '2v2',
+    format: matchMode
   };
 }
 
@@ -1717,6 +1875,7 @@ let applyRemoteSettings = function (s) {
   balloonGravity = d.gravity;
   balloonDrag = d.drag;
   matchTime = s.time || 180;
+  matchMode = s.format || (s.teamMode ? '2v2' : '1v1');
   playerColorIdx[0] = s.hostColor ?? 0;
   playerColorIdx[1] = s.guestColor ?? 1;
   applyColors();
@@ -1813,6 +1972,16 @@ applyRemoteSettings = function (sv) {
   if (!isHost) { playerColorIdx[1] = mine; applyColors(); }
 };
 
+function updateScoreLabels() {
+  const n1 = document.getElementById('name1');
+  const n2 = document.getElementById('name2');
+  if (isTeamMode()) {
+    n1.textContent = 'TEAM 1'; n2.textContent = 'TEAM 2';
+  } else {
+    n1.textContent = 'Player 1'; n2.textContent = 'Player 2';
+  }
+}
+
 function startOnlineMatch() {
   try {
   online = true;
@@ -1820,9 +1989,12 @@ function startOnlineMatch() {
   state = 'starting';
   lobbyMenu.classList.add('hidden');
   p2.body.visible = true;
-  extrasEnabled = false;           // lean map, same as local 1v1
-  extraMeshes.forEach(m => m.visible = false);
+  // More obstacles for team play (4 players need a busier map), lean for 1v1
+  extrasEnabled = isTeamMode();
+  extraMeshes.forEach(m => m.visible = extrasEnabled);
+  players.forEach(pl => { pl.body.visible = !!pl.active; });
   updateAspect();
+  updateScoreLabels();
   startNewMatch();
   if (fallbackMode) beginPlaying();
   else requestLock();
@@ -1840,16 +2012,22 @@ function netTick(dt) {
     netSendTimer = NET_RATE;
     const mine = (myNum === 1) ? p1 : p2;
     socket.emit('state', {
+      n: myNum,
       x: mine.pos.x, y: mine.pos.y, z: mine.pos.z,
       yaw: mine.yaw, mv: mine.moving ? 1 : 0, ch: mine.charging ? mine.charge : -1
     });
-    if (netDebug.on && performance.now() - (netDebug.lastPing || 0) > 1000) {
+    if (performance.now() - (netDebug.lastPing || 0) > 1000) {
       netDebug.lastPing = performance.now();
       const sent = performance.now();
       const wasHidden = document.hidden;
       socket.emit('ping2', null, () => {
-        netDebug.ping = Math.round(performance.now() - sent);
+        const rtt = performance.now() - sent;
+        netDebug.ping = Math.round(rtt);
         netDebug.pingHidden = wasHidden || document.hidden;
+        // Ignore samples taken while throttled — they'd poison the compensation
+        if (!netDebug.pingHidden && rtt < 1000) {
+          halfRTT = halfRTT ? (halfRTT * 0.7 + (rtt / 2) * 0.3) : rtt / 2;
+        }
       });
     }
     if (isHost) {
@@ -1865,9 +2043,10 @@ function netTick(dt) {
       socket.emit('event', { t: 'timer', timeLeft, sd: suddenDeath });
     }
   }
-  // Interpolate the opponent between buffered snapshots, rendered slightly in the
-  // past. This trades ~90ms of freshness for motion with no judder.
-  const rp = (myNum === 1) ? p2 : p1;
+  // Interpolate every remote player between buffered snapshots, rendered slightly
+  // in the past. Trades a little freshness for motion with no judder.
+  players.forEach(rp => {
+  if (!rp.active || rp.num === myNum) return;
   const snaps = rp.snaps;
   if (snaps && snaps.length) {
     const renderAt = performance.now() - INTERP_DELAY;
@@ -1908,6 +2087,7 @@ function netTick(dt) {
 
     while (snaps.length > 2 && snaps[1].t < renderAt) snaps.shift();
   }
+  });
 }
 /* ================= SCORING ================= */
 function finishMatch() {
@@ -1921,18 +2101,20 @@ function finishMatch() {
 }
 
 function pointScored(byPlayer, customMsg) {
+  // In 2v2 byPlayer is a TEAM number; in 1v1 it's the player number. Both map to
+  // the same two score counters.
   if (byPlayer === 1) score1++; else score2++;
   score1El.textContent = score1;
   score2El.textContent = score2;
+  teamTouches = 0; lastTeam = 0;
 
   if (score1 >= WIN_SCORE || score2 >= WIN_SCORE || suddenDeath) {
     finishMatch();
     return;
   }
 
-  const msg = customMsg || (byPlayer === 1
-    ? 'Point for Player 1! Player 2 failed to save'
-    : 'Point for Player 2! Player 1 failed to save');
+  const side = n => isTeamMode() ? ('Team ' + n) : ('Player ' + n);
+  const msg = customMsg || (side(byPlayer) + ' scores! ' + side(byPlayer === 1 ? 2 : 1) + ' failed to save');
   roundMsgEl.textContent = msg;
   roundMsgEl.style.display = 'block';
   roundPause = 1.6;
@@ -1989,7 +2171,17 @@ function floorWatchdog(dt) {
       roundPause = 1.2;
       if (online && isHost && socket) socket.emit('event', { t: 'timer', timeLeft, sd: suddenDeath, msg: roundMsgEl.textContent });
     } else {
-      pointScored(lastToucher);
+      const airTime = performance.now() / 1000 - lastSlapAt;
+      const scorer = isTeamMode() ? teamOf(lastToucher) : lastToucher;
+
+      if (airTime < SPIKE_WINDOW) {
+        // Slammed straight into the floor — the balloon has to travel, so this is a foul
+        const against = isTeamMode() ? otherTeam(teamOf(lastToucher)) : (lastToucher === 1 ? 2 : 1);
+        pointScored(against, 'Spiked into the floor by Player ' + lastToucher + '! Point for ' +
+                    (isTeamMode() ? 'team ' + against : 'Player ' + against));
+      } else {
+        pointScored(scorer);
+      }
     }
   }
 }
@@ -2076,8 +2268,7 @@ function updateBalloon(dt) {
   }
   nudgeRestingBalloon(dt);
   floorWatchdog(dt);
-  playerPushesBalloon(p1, 1);
-  if (isDuel()) playerPushesBalloon(p2, 2);
+  activePlayers().forEach(pl => playerPushesBalloon(pl, pl.num));
 
   /* Spin + damping + soft self-righting (heavy knot pulls down) */
   if (balloonAngVel.lengthSq() > 0.0001) {
@@ -2119,7 +2310,17 @@ function updateBalloon(dt) {
       if (online && isHost && socket) socket.emit('event', { t: 'timer', timeLeft, sd: suddenDeath, msg: pmsg });
       if (timeLeft <= 0 && !suddenDeath) timeExpired();
     } else {
-      pointScored(lastToucher);
+      const airTime = performance.now() / 1000 - lastSlapAt;
+      const scorer = isTeamMode() ? teamOf(lastToucher) : lastToucher;
+
+      if (airTime < SPIKE_WINDOW) {
+        // Slammed straight into the floor — the balloon has to travel, so this is a foul
+        const against = isTeamMode() ? otherTeam(teamOf(lastToucher)) : (lastToucher === 1 ? 2 : 1);
+        pointScored(against, 'Spiked into the floor by Player ' + lastToucher + '! Point for ' +
+                    (isTeamMode() ? 'team ' + against : 'Player ' + against));
+      } else {
+        pointScored(scorer);
+      }
     }
   }
 }
@@ -2212,9 +2413,9 @@ function movePlayer(pl, fwdKey, backKey, rightKey, leftKey, jumpHeld, dt) {
 
 function updatePlayers(dt) {
   if (online) {
-    // Online: I always drive my own player with WASD + mouse; the other is network-driven.
-    // With a menu open, movement keys are ignored but physics still runs.
-    const mine = (myNum === 1) ? p1 : p2;
+    // Online: I always drive my own player with WASD + mouse; everyone else is
+    // network-driven. With a menu open, movement keys are ignored but physics runs.
+    const mine = myPlayer();
     const menuOpen = (state !== 'playing');
     if (menuOpen) {
       movePlayer(mine, '__none', '__none', '__none', '__none', false, dt);
@@ -2303,14 +2504,13 @@ function stepGame(dt) {
 
     netTick(dt);
 
-    if (p1.punchAnim > 0) p1.punchAnim -= dt;
-    if (p2.punchAnim > 0) p2.punchAnim -= dt;
+    players.forEach(pl => { if (pl.punchAnim > 0) pl.punchAnim -= dt; });
 
-    for (const pl of [p1, p2]) {
+    for (const pl of players) {
       if (pl.charging) pl.charge = Math.min(1, pl.charge + dt / CHARGE_TIME);
     }
     // Online: bar 1 is MY bar whichever player I am. Local split-screen keeps 1=P1, 2=P2.
-    const bar1Player = online ? ((myNum === 2) ? p2 : p1) : p1;
+    const bar1Player = online ? myPlayer() : p1;
     chargeFill1.style.width = (bar1Player.charge * 100) + '%';
     chargeFill2.style.width = (p2.charge * 100) + '%';
 
@@ -2327,7 +2527,7 @@ function stepGame(dt) {
     });
 
     const walkT = performance.now() * 0.012;
-    for (const pl of [p1, p2]) {
+    for (const pl of players) {
       const ud = pl.body.userData;
       const sw = pl.moving ? Math.sin(walkT) * 0.55 : 0;
       const ease = Math.min(1, dt * 12);
