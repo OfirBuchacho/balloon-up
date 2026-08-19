@@ -261,11 +261,6 @@
   <!-- STEP 2b: online role -->
   <div id="onlineStep" class="hidden">
     <div id="connStatus" class="lobbyNote">Connecting to server…</div>
-    <div class="settingRow" id="formatRow">
-      <span class="settingLabel">Format:</span>
-      <button class="pill fmtBtn selected" data-fmt="1v1">1 vs 1</button>
-      <button class="pill fmtBtn" data-fmt="2v2">2 vs 2 👥</button>
-    </div>
     <div class="modeCards">
       <div class="modeCard" id="hostCard">
         <div class="icon">👑</div>
@@ -282,6 +277,11 @@
 
   <!-- STEP 3: settings (host / local only) -->
   <div id="settingsStep" class="hidden">
+    <div class="settingRow" id="formatRow">
+      <span class="settingLabel">Format:</span>
+      <button class="pill fmtBtn selected" data-fmt="1v1">1 vs 1</button>
+      <button class="pill fmtBtn" data-fmt="2v2">2 vs 2 👥</button>
+    </div>
     <div class="settingRow">
       <span class="settingLabel">Balloon weight:</span>
       <button class="pill diffBtn" data-diff="easy">Light 🪶</button>
@@ -321,7 +321,7 @@
 
 <!-- ONLINE LOBBY -->
 <div id="lobbyMenu" class="menu hidden">
-  <h2>🌐 ONLINE 1v1</h2>
+  <h2 id="lobbyTitle">🌐 ONLINE 1v1</h2>
 
   <!-- Host waiting with the code -->
   <div id="lobbyHost" class="hidden">
@@ -352,6 +352,7 @@
   <div id="lobbyWaiting" class="hidden">
     <div id="waitCode" class="lobbyNote"></div>
     <div class="lobbyNote">✅ Connected! Waiting for the host to start the match…</div>
+    <div id="guestFormatNote" class="lobbyNote"></div>
     <div id="teamPickGuest" class="settingRow hidden" style="justify-content:center">
       <span class="settingLabel">Your team:</span>
       <button class="pill teamBtnG selected" data-team="1">TEAM 1 🔵</button>
@@ -1283,6 +1284,7 @@ function wireFormatButtons() {
       document.querySelectorAll('.fmtBtn').forEach(b => b.classList.remove('selected'));
       btn.classList.add('selected');
       matchMode = btn.dataset.fmt;
+      refreshFormatUI();
     });
   });
   ['teamBtn', 'teamBtnG'].forEach(cls => {
@@ -1336,6 +1338,7 @@ function showMenuStep(step) {
   } else if (step === 'local') {
     localStep.classList.remove('hidden');
     settingsStep.classList.remove('hidden');
+    document.getElementById('formatRow').classList.add('hidden');   // online-only choice
     playBtn.classList.remove('hidden');
     playBtn.textContent = '▶ PLAY';
     document.getElementById('timeRow').classList.toggle('hidden', mode === 'free');
@@ -1345,6 +1348,7 @@ function showMenuStep(step) {
     connectSocket();
   } else if (step === 'hostSetup') {
     settingsStep.classList.remove('hidden');
+    document.getElementById('formatRow').classList.remove('hidden');
     document.getElementById('timeRow').classList.remove('hidden');
     document.getElementById('colorRow2').classList.remove('hidden');
     playBtn.classList.remove('hidden');
@@ -1876,6 +1880,7 @@ let applyRemoteSettings = function (s) {
   balloonDrag = d.drag;
   matchTime = s.time || 180;
   matchMode = s.format || (s.teamMode ? '2v2' : '1v1');
+  if (typeof refreshFormatUI === 'function') refreshFormatUI();
   playerColorIdx[0] = s.hostColor ?? 0;
   playerColorIdx[1] = s.guestColor ?? 1;
   applyColors();
@@ -1906,8 +1911,11 @@ function doCreateRoom() {
     myNum = 1;
     roomCode = res.code;
     roomCodeEl.textContent = res.code;
-    hostStatus.textContent = 'Waiting for a player to join…';
+    hostStatus.textContent = isTeamMode()
+      ? 'Waiting for players… (1/4)'
+      : 'Waiting for a player to join…';
     startMatchBtn.classList.add('hidden');
+    refreshFormatUI();
     showLobby(lobbyHost);
   });
 }
@@ -1937,6 +1945,7 @@ function doJoin() {
     if (res.settings) applyRemoteSettings(res.settings);
     playerColorIdx[1] = myColor;      // keep my chosen colour
     applyColors();
+    refreshFormatUI();
     socket.emit('event', { t: 'guestColor', idx: myColor });
     document.getElementById('waitCode').textContent = 'Room ' + res.code;
     showLobbyStep(lobbyWaiting);
@@ -1971,6 +1980,18 @@ applyRemoteSettings = function (sv) {
   _applyRemoteSettings(sv);
   if (!isHost) { playerColorIdx[1] = mine; applyColors(); }
 };
+
+function refreshFormatUI() {
+  const t = document.getElementById('lobbyTitle');
+  if (t) t.textContent = isTeamMode() ? '🌐 ONLINE 2v2' : '🌐 ONLINE 1v1';
+  const guestNote = document.getElementById('guestFormatNote');
+  if (guestNote) guestNote.textContent = isTeamMode()
+    ? 'The host chose 2 vs 2 — pick your team below.'
+    : 'The host chose 1 vs 1.';
+  document.getElementById('teamPick').classList.toggle('hidden', !isTeamMode());
+  document.getElementById('teamPickGuest').classList.toggle('hidden', !isTeamMode());
+  updateScoreLabels();
+}
 
 function updateScoreLabels() {
   const n1 = document.getElementById('name1');

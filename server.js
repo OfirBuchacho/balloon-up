@@ -34,6 +34,16 @@ function makeCode() {
   return code;
 }
 
+/* The client has sent this under a few names over time — accept them all so a
+   mismatched field never silently caps a 2v2 room at two players. */
+function isTeamSettings(settings) {
+  if (!settings) return false;
+  return settings.teamMode === true ||
+         settings.mode === "2v2" ||
+         settings.format === "2v2";
+}
+function capacityFor(settings) { return isTeamSettings(settings) ? 4 : 2; }
+
 function roomOf(socket) {
   for (const code of socket.rooms) {
     if (rooms[code]) return rooms[code];
@@ -65,7 +75,7 @@ io.on("connection", (socket) => {
       code,
       hostId: socket.id,
       settings: settings || {},
-      maxPlayers: (settings && settings.mode === "2v2") ? 4 : 2,
+      maxPlayers: capacityFor(settings),
       players: { [socket.id]: { name: name || "Player 1", color: color || 0, num: 1, team: 1 } },
       started: false
     };
@@ -132,7 +142,7 @@ io.on("connection", (socket) => {
     const room = roomOf(socket);
     if (!room || room.hostId !== socket.id) return;
     room.settings = settings;
-    room.maxPlayers = (settings && settings.mode === "2v2") ? 4 : 2;
+    room.maxPlayers = capacityFor(settings);
     io.to(room.code).emit("roomUpdate", { players: playerList(room), settings });
   });
 
