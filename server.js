@@ -165,7 +165,10 @@ io.on("connection", (socket) => {
       }
     }
     room.started = true;
-    io.to(room.code).emit("matchStarted", { settings: room.settings, players: list });
+    io.to(room.code).emit("matchStarted", {
+      settings: room.settings, players: list,
+      map: room.settings && room.settings.mapPicked
+    });
     console.log("match started:", room.code);
     ack({ ok: true });
   });

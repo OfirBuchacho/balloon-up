@@ -177,6 +177,32 @@
     background: #b3261e; color: #fff; font-size: 14px; font-family: monospace;
     padding: 10px 16px; text-align: left; white-space: pre-wrap; max-height: 30vh; overflow: auto;
   }
+  #mapLoading {
+    position: fixed; inset: 0; z-index: 12; display: flex;
+    align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at 50% 40%, #241f3d, #0b0b14 70%);
+  }
+  .mapCard {
+    width: min(680px, 88vw); border-radius: 18px; overflow: hidden;
+    background: rgba(20,20,32,0.9); border: 2px solid rgba(255,209,102,0.35);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.55);
+  }
+  #mapShot { display: block; width: 100%; height: auto; background: #11111a; }
+  .mapMeta { padding: 16px 22px 20px; text-align: center; }
+  #mapName {
+    font-size: 34px; font-weight: 900; letter-spacing: 3px; color: #fff;
+    text-transform: uppercase;
+  }
+  #mapSub { font-size: 15px; color: #9a9ab4; margin-top: 4px; letter-spacing: 1px; }
+  .loadTrack {
+    margin: 14px auto 0; width: 70%; height: 6px; border-radius: 999px;
+    background: rgba(255,255,255,0.12); overflow: hidden;
+  }
+  #loadBar {
+    height: 100%; width: 0%; border-radius: 999px;
+    background: linear-gradient(90deg, #ffd166, #ff9f43);
+    transition: width 0.25s linear;
+  }
   #netMsg {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 9;
     background: rgba(20,20,30,0.85); color: #ffd166; font-size: 22px; font-weight: 700;
@@ -288,6 +314,12 @@
       <button class="pill diffBtn selected" data-diff="normal">Normal 🎈</button>
       <button class="pill diffBtn" data-diff="hard">Heavy 🪨</button>
     </div>
+    <div class="settingRow" id="mapRow">
+      <span class="settingLabel">Map:</span>
+      <button class="pill mapBtn selected" data-map="random">🎲 Random</button>
+      <button class="pill mapBtn" data-map="living">🛋️ Living Room</button>
+      <button class="pill mapBtn" data-map="gym">💪 The Gym</button>
+    </div>
     <div class="settingRow" id="timeRow">
       <span class="settingLabel">Match time:</span>
       <button class="pill timeBtn selected" data-time="180">3 min</button>
@@ -382,6 +414,16 @@
 
 <div id="errBanner"></div>
 <div id="netDebug"></div>
+<div id="mapLoading" class="hidden">
+  <div class="mapCard">
+    <img id="mapShot" alt="">
+    <div class="mapMeta">
+      <div id="mapName">Living Room</div>
+      <div id="mapSub">Loading…</div>
+      <div class="loadTrack"><div id="loadBar"></div></div>
+    </div>
+  </div>
+</div>
 <div id="netMsg"></div>
 <div id="clickToPlay" class="hidden">
   <div class="ctpBox">
@@ -507,6 +549,7 @@ function addBox(x, y, z, w, h, d, color, opts = {}) {
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   scene.add(mesh);
+  if (typeof trackMap === 'function') trackMap(mesh);
   if (opts.extra) extraMeshes.push(mesh);
   if (!opts.decorOnly) {
     const box = {
@@ -609,6 +652,23 @@ const fabricTex = canvasTexture(128, 128, (ctx, w, h) => {
     ctx.fillRect(x, 0, 1, h);
   }
 }, 8, 8);
+
+/* ================= MAPS ================= */
+/* Every map is a builder function. Building clears the previous world, so maps
+   can be switched between matches without reloading the page. */
+const mapMeshes = [];        // everything the current map added to the scene
+
+function clearMap() {
+  mapMeshes.forEach(m => {
+    scene.remove(m);
+    if (m.geometry) m.geometry.dispose();
+  });
+  mapMeshes.length = 0;
+  obstacles.length = 0;
+  extraMeshes.length = 0;
+}
+
+function trackMap(o) { if (o) mapMeshes.push(o); return o; }
 
 function makeRoom() {
   const g = new THREE.Group();
@@ -753,9 +813,12 @@ function makeRoom() {
 
   return g;
 }
-scene.add(makeRoom());
 
-/* ================= FURNITURE (symmetric map) ================= */
+function buildLivingRoom() {
+  const room = makeRoom();
+  scene.add(room); trackMap(room);
+
+  // --- furniture ---
 function addFabricBox(x, y, z, w, h, d, color) {
   const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.95, map: fabricTex });
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -763,6 +826,7 @@ function addFabricBox(x, y, z, w, h, d, color) {
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   scene.add(mesh);
+  if (typeof trackMap === 'function') trackMap(mesh);
   obstacles.push({
     min: new THREE.Vector3(x - w/2, y, z - d/2),
     max: new THREE.Vector3(x + w/2, y + h, z + d/2)
@@ -847,10 +911,157 @@ const toyBall = new THREE.Mesh(
 toyBall.position.set(-5.5, 0.8, 4.5);
 toyBall.castShadow = true;
 scene.add(toyBall);
+trackMap(toyBall);
 obstacles.push({
   min: new THREE.Vector3(-5.5 - 0.7, 0, 4.5 - 0.7),
   max: new THREE.Vector3(-5.5 + 0.7, 1.5, 4.5 + 0.7)
 });
+
+
+}
+
+/* ---------------- GYM 💪 ---------------- */
+const rubberTex = canvasTexture(256, 256, (ctx, w, h) => {
+  ctx.fillStyle = '#2b2f36';
+  ctx.fillRect(0, 0, w, h);
+  for (let i = 0; i < 2600; i++) {                    // speckled rubber flooring
+    const g = 40 + Math.random() * 60;
+    ctx.fillStyle = `rgba(${g},${g + 6},${g + 12},${0.25 + Math.random() * 0.35})`;
+    ctx.fillRect(Math.random() * w, Math.random() * h, 3, 3);
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  for (let y = 0; y < h; y += 64) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+  for (let x = 0; x < w; x += 64) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+}, 6, 5);
+
+const mirrorTex = canvasTexture(128, 256, (ctx, w, h) => {
+  const g = ctx.createLinearGradient(0, 0, w, h);
+  g.addColorStop(0, '#9fb6c4'); g.addColorStop(0.5, '#c9dbe6'); g.addColorStop(1, '#8ea6b5');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+});
+
+function buildGym() {
+  const g = new THREE.Group();
+
+  // Rubber floor
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.w, ROOM.d),
+    new THREE.MeshStandardMaterial({ map: rubberTex, roughness: 0.9 }));
+  floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; g.add(floor);
+
+  // Painted lifting platform in the middle of the floor
+  const platform = new THREE.Mesh(new THREE.PlaneGeometry(9, 7),
+    new THREE.MeshStandardMaterial({ color: 0x8a5a2b, roughness: 0.8 }));
+  platform.rotation.x = -Math.PI/2; platform.position.set(0, 0.005, -1); g.add(platform);
+
+  // Walls
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x39404a, roughness: 0.95 });
+  const wide = new THREE.PlaneGeometry(ROOM.w, ROOM.h), deep = new THREE.PlaneGeometry(ROOM.d, ROOM.h);
+  const back = new THREE.Mesh(wide, wallMat); back.position.set(0, ROOM.h/2, -ROOM.d/2); g.add(back);
+  const front = new THREE.Mesh(wide, wallMat); front.position.set(0, ROOM.h/2, ROOM.d/2); front.rotation.y = Math.PI; g.add(front);
+  const left = new THREE.Mesh(deep, wallMat); left.position.set(-ROOM.w/2, ROOM.h/2, 0); left.rotation.y = Math.PI/2; g.add(left);
+  const right = new THREE.Mesh(deep, wallMat); right.position.set(ROOM.w/2, ROOM.h/2, 0); right.rotation.y = -Math.PI/2; g.add(right);
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.w, ROOM.d),
+    new THREE.MeshStandardMaterial({ color: 0x22262c }));
+  ceil.rotation.x = Math.PI/2; ceil.position.y = ROOM.h; g.add(ceil);
+
+  // Mirror wall along the left side
+  const mirror = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.d - 4, 5.5),
+    new THREE.MeshStandardMaterial({ map: mirrorTex, roughness: 0.12, metalness: 0.6 }));
+  mirror.rotation.y = Math.PI/2; mirror.position.set(-ROOM.w/2 + 0.12, 3.6, 0); g.add(mirror);
+
+  // Motivational stripe on the back wall
+  const stripe = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.w - 2, 0.7),
+    new THREE.MeshStandardMaterial({ color: 0xffb020, emissive: 0x442a00 }));
+  stripe.position.set(0, 7.2, -ROOM.d/2 + 0.1); g.add(stripe);
+
+  scene.add(g); trackMap(g);
+
+  // --- equipment (all solid) ---
+  const RUBBER = 0x1e2228, STEEL = 0x8e97a3, RED = 0xc0392b, BLUE = 0x2f6fb5;
+
+  // Weight bench, centre-right — climbable in two steps
+  addBox(7.5, 0, -2.0, 1.2, 0.55, 4.2, RUBBER);              // bench pad base
+  addBox(7.5, 0.55, -2.0, 1.4, 0.35, 4.4, 0x2c3138);         // padding
+  addBox(6.3, 0, -3.6, 0.35, 1.9, 0.35, STEEL);              // uprights
+  addBox(8.7, 0, -3.6, 0.35, 1.9, 0.35, STEEL);
+  addBox(7.5, 1.9, -3.6, 3.2, 0.22, 0.22, STEEL);            // barbell on the rack
+  addBox(6.1, 1.75, -3.6, 0.5, 0.5, 0.5, RUBBER);            // plates
+  addBox(8.9, 1.75, -3.6, 0.5, 0.5, 0.5, RUBBER);
+
+  // Squat rack — the tall structure, top is the highest perch in the map
+  addBox(-7.5, 0, -7.0, 0.5, 5.2, 0.5, RED);
+  addBox(-4.5, 0, -7.0, 0.5, 5.2, 0.5, RED);
+  addBox(-6.0, 5.2, -7.0, 3.5, 0.4, 0.5, RED);               // top crossbar
+  addBox(-6.0, 2.4, -7.0, 3.5, 0.22, 0.22, STEEL);           // barbell at chest height
+
+  // Stacked plates as stepping stones up to the rack
+  addBox(-3.2, 0, -5.4, 1.6, 0.5, 1.6, RUBBER);
+  addBox(-3.2, 0.5, -5.4, 1.4, 0.45, 1.4, RED);
+  addBox(-3.2, 0.95, -5.4, 1.2, 0.45, 1.2, BLUE);
+
+  // Plyo boxes — classic jump-up cubes, but they read as gym gear
+  addBox(3.0, 0, 4.5, 1.8, 0.9, 1.8, 0x3b4550);
+  addBox(5.2, 0, 5.2, 2.0, 1.7, 2.0, 0x46515e);
+  addBox(7.6, 0, 5.6, 2.2, 2.5, 2.2, 0x515d6b);
+
+  // Treadmill along the right wall — deck plus console, run underneath the frame
+  addBox(11.0, 0, 0.5, 2.4, 0.55, 5.5, 0x2a2f36);            // deck
+  addBox(11.0, 0.55, -1.9, 2.4, 0.12, 4.0, 0x15181c);        // belt
+  addBox(11.0, 0.55, 1.9, 2.2, 1.9, 0.35, STEEL);            // console post
+  addBox(11.0, 2.45, 1.9, 2.2, 0.9, 0.5, 0x111417);          // screen
+
+  // Dumbbell rack along the front wall
+  addBox(-2.0, 0, 8.6, 7.0, 0.9, 1.4, 0x30363d);
+  for (let i = 0; i < 5; i++) {
+    const x = -4.6 + i * 1.3;
+    addBox(x, 0.9, 8.6, 0.35, 0.6, 0.6, RUBBER);             // handles
+    addBox(x, 0.9, 8.2, 0.6, 0.6, 0.35, RUBBER);
+  }
+
+  // Medicine balls (decorative spheres, with colliders)
+  [[-9.5, 3.5, 0.75, 0xe4b23a], [-10.8, 5.2, 0.6, 0x4f9d5c]].forEach(([x, z, r, col]) => {
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 16),
+      new THREE.MeshStandardMaterial({ color: col, roughness: 0.7 }));
+    ball.position.set(x, r, z); ball.castShadow = true;
+    scene.add(ball); trackMap(ball);
+    obstacles.push({
+      min: new THREE.Vector3(x - r * 0.85, 0, z - r * 0.85),
+      max: new THREE.Vector3(x + r * 0.85, r * 1.9, z + r * 0.85)
+    });
+  });
+
+  // Extra clutter for team matches
+  addBox(0.5, 0, 6.8, 1.5, 0.8, 1.5, 0x6b3fa0, { extra: true });   // foam roller crate
+  addBox(-6.5, 0, 4.2, 2.6, 0.45, 1.2, 0x2f7d6d, { extra: true }); // step platform
+  addBox(-6.5, 0.45, 4.2, 2.4, 0.4, 1.0, 0x246054, { extra: true });
+}
+
+/* ---------------- map registry ---------------- */
+const MAPS = {
+  living: { name: 'Living Room', emoji: '🛋️', build: buildLivingRoom,
+            preview: { pos: [11, 7.5, 13], look: [0, 2.5, -1] } },
+  gym:    { name: 'The Gym',     emoji: '💪', build: buildGym,
+            preview: { pos: [12, 8, 12], look: [0, 2.5, -1] } }
+};
+const MAP_KEYS = Object.keys(MAPS);
+let currentMapKey = 'living';
+
+function buildMap(key) {
+  const def = MAPS[key] || MAPS.living;
+  clearMap();
+  def.build();
+  currentMapKey = MAPS[key] ? key : 'living';
+  return def;
+}
+
+function pickMapKey(choice) {
+  if (choice === 'random' || !MAPS[choice]) {
+    return MAP_KEYS[Math.floor(Math.random() * MAP_KEYS.length)];
+  }
+  return choice;
+}
+
+buildMap('living');       // the world exists from load; matches rebuild it as needed
 
 /* ================= BALLOON ================= */
 const balloonMat = new THREE.MeshStandardMaterial({
@@ -1275,6 +1486,61 @@ function formatTime(t) {
 }
 
 /* ================= MENU LOGIC ================= */
+/* ---------- Map selection + loading screen ---------- */
+let mapChoice = 'random';        // what the host picked ('random' or a map key)
+let pendingMapKey = null;        // resolved map for the match about to start
+
+document.querySelectorAll('.mapBtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.mapBtn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    mapChoice = btn.dataset.map;
+  });
+});
+
+/* Render the freshly built map from a fixed scenic camera and use that frame as
+   the loading-screen artwork — so every future map gets a preview for free. */
+function captureMapShot(def) {
+  const cam = new THREE.PerspectiveCamera(52, 16/9, 0.1, 120);
+  const p = def.preview || { pos: [12, 8, 12], look: [0, 2.5, 0] };
+  cam.position.set(p.pos[0], p.pos[1], p.pos[2]);
+  cam.lookAt(new THREE.Vector3(p.look[0], p.look[1], p.look[2]));
+
+  const w = renderer.domElement.width, h = renderer.domElement.height;
+  players.forEach(pl => { pl.body.visible = false; });
+  const balloonWasVisible = balloon.visible;
+  balloon.visible = false;
+
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, w, h);
+  renderer.render(scene, cam);
+  let url = '';
+  try { url = renderer.domElement.toDataURL('image/jpeg', 0.82); } catch (e) {}
+  renderer.setScissorTest(true);
+
+  balloon.visible = balloonWasVisible;
+  players.forEach(pl => { pl.body.visible = !!pl.active; });
+  return url;
+}
+
+const mapLoading = document.getElementById('mapLoading');
+function showMapLoading(def, ms, onDone) {
+  document.getElementById('mapName').textContent = def.emoji + '  ' + def.name;
+  document.getElementById('mapSub').textContent = isTeamMode() ? '2 vs 2' : (mode === 'free' ? 'Free Play' : '1 vs 1');
+  const shot = captureMapShot(def);
+  const img = document.getElementById('mapShot');
+  if (shot) img.src = shot; else img.removeAttribute('src');
+
+  const bar = document.getElementById('loadBar');
+  bar.style.width = '0%';
+  mapLoading.classList.remove('hidden');
+  setTimeout(() => { bar.style.width = '100%'; }, 60);
+  setTimeout(() => {
+    mapLoading.classList.add('hidden');
+    if (onDone) onDone();
+  }, ms);
+}
+
 /* ---------- Format (1v1 / 2v2) and team pickers ---------- */
 let myTeam = 1;
 
@@ -1636,14 +1902,17 @@ document.getElementById('playBtn').addEventListener('click', () => {
   if (menuStep === 'guestSetup') { openGuestJoin(); return; }
   online = false;
   state = 'starting';
+  const def = buildMap(pickMapKey(mapChoice));
   p2.body.visible = (mode === '1v1');
   // Obstacle density: full map in Free Play, leaner map in 1v1 (more will return for team modes)
   extrasEnabled = (mode === 'free');
   extraMeshes.forEach(m => m.visible = extrasEnabled);
   startNewMatch();
   mainMenu.classList.add('hidden');
-  if (fallbackMode) beginPlaying();
-  else requestLock();
+  showMapLoading(def, 2200, () => {
+    if (fallbackMode) beginPlaying();
+    else requestLock();
+  });
 });
 document.getElementById('resumeBtn').addEventListener('click', resumeGame);
 document.getElementById('rematchBtn').addEventListener('click', () => {
@@ -1756,6 +2025,7 @@ function connectSocket() {
   });
 
   socket.on('matchStarted', d => {
+    if (d && d.map) pendingMapKey = d.map;
     if (d && d.settings) applyRemoteSettings(d.settings);
     if (d && d.players) applyRoster(d.players);
     startOnlineMatch();
@@ -1870,7 +2140,9 @@ function currentSettings() {
     hostColor: playerColorIdx[0],
     guestColor: playerColorIdx[1],
     teamMode: matchMode === '2v2',
-    format: matchMode
+    format: matchMode,
+    map: mapChoice,
+    mapPicked: pickMapKey(mapChoice)
   };
 }
 
@@ -1880,6 +2152,7 @@ let applyRemoteSettings = function (s) {
   balloonDrag = d.drag;
   matchTime = s.time || 180;
   matchMode = s.format || (s.teamMode ? '2v2' : '1v1');
+  if (s.mapPicked) pendingMapKey = s.mapPicked;      // everyone plays the host's map
   if (typeof refreshFormatUI === 'function') refreshFormatUI();
   playerColorIdx[0] = s.hostColor ?? 0;
   playerColorIdx[1] = s.guestColor ?? 1;
@@ -1905,7 +2178,9 @@ document.getElementById('guestCancelBtn').onclick = backToMenu;
 
 function doCreateRoom() {
   if (!socket || !socket.connected) { connStatus.textContent = '⚠️ Not connected to the server yet'; return; }
-  socket.emit('createRoom', { name: 'Host', color: playerColorIdx[0], settings: currentSettings() }, res => {
+  const setup = currentSettings();
+  pendingMapKey = setup.mapPicked;
+  socket.emit('createRoom', { name: 'Host', color: playerColorIdx[0], settings: setup }, res => {
     if (!res.ok) { connStatus.textContent = res.error; return; }
     isHost = true;
     myNum = 1;
@@ -1959,7 +2234,9 @@ startMatchBtn.onclick = () => {
     hostStatus.textContent = '⚠️ Lost connection to the server — reload the page.';
     return;
   }
-  socket.emit('updateSettings', currentSettings());
+  const setup = currentSettings();
+  pendingMapKey = setup.mapPicked;
+  socket.emit('updateSettings', setup);
   hostStatus.textContent = 'Starting…';
   let answered = false;
   socket.emit('startMatch', null, res => {
@@ -2016,9 +2293,13 @@ function startOnlineMatch() {
   players.forEach(pl => { pl.body.visible = !!pl.active; });
   updateAspect();
   updateScoreLabels();
+  const def = buildMap(pendingMapKey || 'living');
+  extraMeshes.forEach(m => m.visible = extrasEnabled);
   startNewMatch();
-  if (fallbackMode) beginPlaying();
-  else requestLock();
+  showMapLoading(def, 2200, () => {
+    if (fallbackMode) beginPlaying();
+    else requestLock();
+  });
   } catch (err) {
     if (window.__gameError) window.__gameError('startOnlineMatch: ' + err.message);
     throw err;
