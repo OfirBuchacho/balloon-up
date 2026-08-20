@@ -317,8 +317,6 @@
     <div class="settingRow" id="mapRow">
       <span class="settingLabel">Map:</span>
       <button class="pill mapBtn selected" data-map="random">🎲 Random</button>
-      <button class="pill mapBtn" data-map="living">🛋️ Living Room</button>
-      <button class="pill mapBtn" data-map="gym">💪 The Gym</button>
     </div>
     <div class="settingRow" id="timeRow">
       <span class="settingLabel">Match time:</span>
@@ -819,20 +817,10 @@ function buildLivingRoom() {
   scene.add(room); trackMap(room);
 
   // --- furniture ---
-function addFabricBox(x, y, z, w, h, d, color) {
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.95, map: fabricTex });
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-  mesh.position.set(x, y + h/2, z);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  scene.add(mesh);
-  if (typeof trackMap === 'function') trackMap(mesh);
-  obstacles.push({
-    min: new THREE.Vector3(x - w/2, y, z - d/2),
-    max: new THREE.Vector3(x + w/2, y + h, z + d/2)
-  });
-  return mesh;
-}
+// Giant book helper: cream page block + protruding cover slabs + spine
+
+
+
 // Sofa — right side
 addFabricBox(8.0, 0,   -8.4, 6.5, 1.8, 3.0, 0x4a6d8c);
 addFabricBox(8.0, 1.8, -9.4, 6.5, 1.6, 1.0, 0x3f5d78);
@@ -861,13 +849,6 @@ addFabricBox(-12.4, 0, -5.6, 1.5, 0.9, 1.5, 0xb0743c);         // low pouf
 addFabricBox(-12.4, 0, -7.7, 1.5, 1.75, 1.5, 0x6d8a5a);        // tall pouf
 addBox(-12.4, 1.75, -7.7, 1.6, 0.14, 1.6, 0x5c7a4a);  // cushion overhang
 
-// Giant book helper: cream page block + protruding cover slabs + spine
-function addBook(x, y, z, w, h, d, coverColor) {
-  addBox(x, y, z, w, h, d, 0xf0ead8);                                        // pages (collider)
-  addBox(x, y - 0.01, z, w + 0.14, 0.09, d + 0.1, coverColor);      // bottom cover
-  addBox(x, y + h - 0.08, z, w + 0.14, 0.09, d + 0.1, coverColor);  // top cover
-  addBox(x - w/2 - 0.06, y, z, 0.13, h, d + 0.1, coverColor);       // spine
-}
 
 // Giant coffee table — center, run underneath!
 addLeggedTop(0, -1.5, 6.5, 3.6, 1.9, 0.2, 0.5, 0x6b4226, 0x54331d);
@@ -918,6 +899,29 @@ obstacles.push({
 });
 
 
+}
+
+/* Shared furniture helpers, used by several maps */
+function addBook(x, y, z, w, h, d, coverColor) {
+  addBox(x, y, z, w, h, d, 0xf0ead8);                                        // pages (collider)
+  addBox(x, y - 0.01, z, w + 0.14, 0.09, d + 0.1, coverColor);      // bottom cover
+  addBox(x, y + h - 0.08, z, w + 0.14, 0.09, d + 0.1, coverColor);  // top cover
+  addBox(x - w/2 - 0.06, y, z, 0.13, h, d + 0.1, coverColor);       // spine
+}
+
+function addFabricBox(x, y, z, w, h, d, color) {
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.95, map: fabricTex });
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  mesh.position.set(x, y + h/2, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  if (typeof trackMap === 'function') trackMap(mesh);
+  obstacles.push({
+    min: new THREE.Vector3(x - w/2, y, z - d/2),
+    max: new THREE.Vector3(x + w/2, y + h, z + d/2)
+  });
+  return mesh;
 }
 
 /* ---------------- GYM 💪 ---------------- */
@@ -1036,12 +1040,356 @@ function buildGym() {
   addBox(-6.5, 0.45, 4.2, 2.4, 0.4, 1.0, 0x246054, { extra: true });
 }
 
+/* ---------------- shared helpers for the new maps ---------------- */
+function shellRoom(opts) {
+  const g = new THREE.Group();
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.w, ROOM.d),
+    new THREE.MeshStandardMaterial(opts.floorMat));
+  floor.rotation.x = -Math.PI/2; floor.receiveShadow = true; g.add(floor);
+
+  const wallMat = new THREE.MeshStandardMaterial(opts.wallMat);
+  const wide = new THREE.PlaneGeometry(ROOM.w, ROOM.h), deep = new THREE.PlaneGeometry(ROOM.d, ROOM.h);
+  const back = new THREE.Mesh(wide, wallMat); back.position.set(0, ROOM.h/2, -ROOM.d/2); g.add(back);
+  const front = new THREE.Mesh(wide, wallMat); front.position.set(0, ROOM.h/2, ROOM.d/2); front.rotation.y = Math.PI; g.add(front);
+  const left = new THREE.Mesh(deep, wallMat); left.position.set(-ROOM.w/2, ROOM.h/2, 0); left.rotation.y = Math.PI/2; g.add(left);
+  const right = new THREE.Mesh(deep, wallMat); right.position.set(ROOM.w/2, ROOM.h/2, 0); right.rotation.y = -Math.PI/2; g.add(right);
+
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(ROOM.w, ROOM.d),
+    new THREE.MeshStandardMaterial({ color: opts.ceilColor || 0xe8e2d5 }));
+  ceil.rotation.x = Math.PI/2; ceil.position.y = ROOM.h; g.add(ceil);
+
+  scene.add(g); trackMap(g);
+  return g;
+}
+
+/* A ceiling light that hangs clear of the balloon's ceiling band */
+function ceilingLight(g, x, z, shadeColor, radius) {
+  const shade = new THREE.Mesh(
+    new THREE.ConeGeometry(radius || 0.9, 0.7, 24, 1, true),
+    new THREE.MeshStandardMaterial({ color: shadeColor || 0xf2d5a0, side: THREE.DoubleSide, emissive: 0x554400 })
+  );
+  shade.position.set(x, ROOM.h - 1.7, z); g.add(shade);
+  const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.35, 8),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a }));
+  cord.position.set(x, ROOM.h - 0.67, z); g.add(cord);
+  obstacles.push({
+    min: new THREE.Vector3(x - (radius || 0.9), ROOM.h - 2.05, z - (radius || 0.9)),
+    max: new THREE.Vector3(x + (radius || 0.9), ROOM.h - 1.35, z + (radius || 0.9))
+  });
+}
+
+/* ---------------- OFFICE 🖥️ ---------------- */
+const carpetTex = canvasTexture(256, 256, (ctx, w, h) => {
+  ctx.fillStyle = '#3c4550'; ctx.fillRect(0, 0, w, h);
+  for (let i = 0; i < 5000; i++) {
+    const v = Math.random() * 0.12;
+    ctx.fillStyle = `rgba(255,255,255,${v})`;
+    ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
+  }
+}, 8, 6);
+
+function buildOffice() {
+  const g = shellRoom({
+    floorMat: { map: carpetTex, roughness: 0.95 },
+    wallMat: { color: 0xd9d6cd, roughness: 0.9 },
+    ceilColor: 0xf2f2ef
+  });
+  ceilingLight(g, -5, 0, 0xf6f2e2); ceilingLight(g, 5, 0, 0xf6f2e2);
+
+  // Window with blinds on the left wall
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(6.5, 4.2),
+    new THREE.MeshBasicMaterial({ color: 0x16305c }));
+  glass.rotation.y = Math.PI/2; glass.position.set(-ROOM.w/2 + 0.2, 5.4, -1); g.add(glass);
+  for (let y = 3.6; y < 7.4; y += 0.42) {
+    const slat = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.16, 6.5),
+      new THREE.MeshStandardMaterial({ color: 0xe6e3da }));
+    slat.position.set(-ROOM.w/2 + 0.28, y, -1); g.add(slat);
+  }
+
+  const DESK = 0x4a3a2c, DARK = 0x33281e, CHAIR = 0x24282e, SCREEN = 0x101318;
+
+  // Long desk bank down the middle — run underneath, climb via the drawer unit
+  addLeggedTop(0, -3.5, 11.0, 3.2, 2.6, 0.25, 0.45, DESK, DARK);
+  addBox(-4.4, 0, -3.5, 1.6, 1.75, 1.6, DARK);                 // drawer pedestal (step)
+  addBox(4.4, 0, -3.5, 1.6, 1.75, 1.6, DARK);
+  // Monitors on top
+  [-3.0, 0, 3.0].forEach(x => {
+    addBox(x, 2.6, -4.4, 2.2, 1.5, 0.18, SCREEN);
+    addBox(x, 2.6, -4.1, 0.5, 0.15, 0.5, 0x2a2f36);
+  });
+  // Keyboards (low, decorative-ish but solid)
+  [-3.0, 0, 3.0].forEach(x => addBox(x, 2.6, -2.9, 1.6, 0.12, 0.6, 0x1c1f24));
+
+  // Office chairs — pass under the seat, climb onto it
+  [[-3.0, -1.0], [3.0, -1.0]].forEach(([x, z]) => {
+    addLeggedTop(x, z, 1.7, 1.7, 1.7, 0.2, 0.25, CHAIR, 0x1b1f24);
+    addBox(x, 1.7, z - 0.75, 1.6, 1.6, 0.3, CHAIR);            // backrest
+  });
+
+  // Filing cabinets along the back wall — a tall ridge to fight over
+  for (let i = 0; i < 4; i++) {
+    const x = -8.5 + i * 5.6;
+    addBox(x, 0, -8.9, 3.4, 3.6, 1.8, 0x5d6570);
+    for (let d = 0; d < 3; d++) {
+      addBox(x, 0.5 + d * 1.1, -7.98, 3.0, 0.12, 0.1, 0x8b929b);  // drawer handles
+    }
+  }
+
+  // Printer + paper stacks on the right
+  addBox(10.5, 0, 3.5, 2.6, 1.9, 2.2, 0x2f343b);
+  addBox(10.5, 1.9, 3.5, 2.2, 0.35, 1.8, 0x454b53);
+  addBox(8.2, 0, 5.6, 1.6, 0.9, 1.2, 0xf0ead8);                // paper ream
+  addBox(8.2, 0.9, 5.6, 1.5, 0.85, 1.1, 0xe8e2cf);
+
+  // Water cooler and a plant
+  addBox(-10.8, 0, 6.2, 1.4, 2.6, 1.4, 0x9fb8c4);
+  addBox(-10.8, 2.6, 6.2, 1.1, 1.3, 1.1, 0x6fa8c8);
+  addBox(-8.0, 0, 8.2, 1.3, 1.1, 1.3, 0xa8552f);
+  const leaf = new THREE.Mesh(new THREE.SphereGeometry(1.1, 12, 10),
+    new THREE.MeshStandardMaterial({ color: 0x3e7042, roughness: 0.9 }));
+  leaf.position.set(-8.0, 2.2, 8.2); leaf.castShadow = true; g.add(leaf);
+  obstacles.push({ min: new THREE.Vector3(-9.0, 1.1, 7.2), max: new THREE.Vector3(-7.0, 3.2, 9.2) });
+
+  // Team-mode clutter
+  addBox(2.0, 0, 7.5, 2.0, 1.2, 2.0, 0x8a6a3f, { extra: true });    // cardboard box
+  addBox(4.6, 0, 7.9, 1.8, 2.1, 1.8, 0x94734a, { extra: true });
+  addBox(-2.5, 0, 5.0, 2.4, 0.6, 1.6, 0x5d6570, { extra: true });   // stacked files
+}
+
+/* ---------------- KITCHEN 🍳 ---------------- */
+const tileTex = canvasTexture(256, 256, (ctx, w, h) => {
+  ctx.fillStyle = '#d8d2c4'; ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = '#b3ac9c'; ctx.lineWidth = 6;
+  for (let i = 0; i <= 2; i++) {
+    ctx.beginPath(); ctx.moveTo(i * 128, 0); ctx.lineTo(i * 128, h); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i * 128); ctx.lineTo(w, i * 128); ctx.stroke();
+  }
+  for (let i = 0; i < 1500; i++) {
+    ctx.fillStyle = `rgba(120,112,98,${Math.random() * 0.06})`;
+    ctx.fillRect(Math.random() * w, Math.random() * h, 3, 3);
+  }
+}, 7, 5);
+
+function buildKitchen() {
+  const g = shellRoom({
+    floorMat: { map: tileTex, roughness: 0.55 },
+    wallMat: { color: 0xe7e2d6, roughness: 0.85 },
+    ceilColor: 0xf6f4ee
+  });
+  ceilingLight(g, 0, -2, 0xffe9b8, 1.0);
+
+  const COUNTER = 0x8a6a45, TOP = 0x2c2f34, STEEL = 0xa8b0b8, WOOD = 0x9a6b3f;
+
+  // Counter run along the back wall, with a raised worktop
+  addBox(-3.0, 0, -8.6, 13.0, 3.0, 2.2, COUNTER);
+  addBox(-3.0, 3.0, -8.6, 13.4, 0.35, 2.4, TOP);
+  // Sink cut into it
+  addBox(-6.5, 3.35, -8.6, 2.6, 0.1, 1.6, 0x7d848c);
+  addBox(-6.5, 3.45, -9.2, 0.25, 1.0, 0.25, STEEL);            // tap
+
+  // Fridge — the tallest thing in the room
+  addBox(9.5, 0, -8.0, 3.4, 6.5, 2.8, STEEL);
+  addBox(9.5, 3.2, -6.55, 3.0, 0.12, 0.14, 0x8f979f);          // door split
+  addBox(11.0, 3.6, -6.6, 0.16, 2.2, 0.16, 0x6d747c);          // handle
+
+  // Oven + hob under the counter, on the right
+  addBox(3.4, 0, -8.6, 3.0, 3.0, 2.2, 0x3a3f45);
+  addBox(3.4, 3.35, -8.6, 2.8, 0.12, 2.0, 0x22262b);
+  [[2.5, -9.1], [4.3, -9.1], [2.5, -8.1], [4.3, -8.1]].forEach(([x, z]) =>
+    addBox(x, 3.4, z, 0.7, 0.1, 0.7, 0x15181c));               // burners
+
+  // Kitchen island in the middle — the centrepiece to fight over
+  addBox(0, 0, -0.5, 7.0, 2.9, 3.6, COUNTER);
+  addBox(0, 2.9, -0.5, 7.4, 0.35, 4.0, TOP);
+  // Bar stools around it, climbable
+  [[-2.2, 2.6], [0.6, 2.6], [3.4, 2.6]].forEach(([x, z]) => {
+    addBox(x, 0, z, 0.35, 2.1, 0.35, STEEL);                   // post
+    addBox(x, 2.1, z, 1.5, 0.3, 1.5, WOOD);                    // seat
+    addBox(x, 0.6, z, 1.1, 0.12, 1.1, STEEL);                  // footrest ring
+  });
+
+  // Dining table + chairs at the front
+  addLeggedTop(-5.0, 5.5, 6.0, 3.4, 2.5, 0.25, 0.4, WOOD, 0x7a5330);
+  [[-7.0, 7.8], [-3.0, 7.8]].forEach(([x, z]) => {
+    addLeggedTop(x, z, 1.5, 1.5, 1.6, 0.18, 0.22, WOOD, 0x7a5330);
+    addBox(x, 1.6, z + 0.65, 1.4, 1.5, 0.25, WOOD);
+  });
+
+  // Wall cabinets (high ledge)
+  addBox(-3.0, 5.6, -9.2, 9.0, 2.4, 1.4, 0x7a5c3c);
+
+  // Fruit bowl and mugs on the island (small but solid)
+  const bowl = new THREE.Mesh(new THREE.SphereGeometry(0.62, 16, 12, 0, Math.PI*2, 0, Math.PI/2),
+    new THREE.MeshStandardMaterial({ color: 0xc9542f, roughness: 0.6 }));
+  bowl.rotation.x = Math.PI; bowl.position.set(1.6, 3.5, -0.5); g.add(bowl);
+  obstacles.push({ min: new THREE.Vector3(1.0, 3.25, -1.1), max: new THREE.Vector3(2.2, 3.9, 0.1) });
+
+  // --- climbing route: low steps first, everything else is too tall to start on ---
+  addBox(-3.5, 0, 2.8, 1.7, 1.0, 1.7, 0xd8cbb4);                   // step stool
+  addBox(-3.5, 1.0, 2.8, 1.5, 0.85, 1.5, 0xc7b89e);                // -> 1.85
+  addBox(4.8, 0, 2.6, 1.7, 1.0, 1.7, 0x8a5a2b);                    // crate by the stools
+  addBox(4.8, 1.0, 2.6, 1.5, 0.85, 1.5, 0x9a6a3a);
+  addBox(-8.4, 0, -6.2, 1.8, 1.0, 1.6, 0xd8cbb4);                  // steps to the counter run
+  addBox(-8.4, 1.0, -6.2, 1.6, 0.9, 1.4, 0xc7b89e);
+  addBox(-8.4, 1.9, -7.0, 1.6, 0.8, 1.2, 0xb5a68c);
+
+  // Team-mode clutter
+  addBox(7.5, 0, 6.5, 1.8, 1.4, 1.8, 0xb5563f, { extra: true });   // crate of veg
+  addBox(9.6, 0, 4.2, 1.6, 2.2, 1.6, 0x6f8f5f, { extra: true });   // water bottles
+  addBox(-9.5, 0, 1.5, 2.2, 1.0, 2.2, 0xcfc6b2, { extra: true });  // flour sacks
+}
+
+/* ---------------- KIDS ROOM 🧸 ---------------- */
+function buildKidsRoom() {
+  const g = shellRoom({
+    floorMat: { map: woodTex, roughness: 0.7 },
+    wallMat: { color: 0xbfe0ef, roughness: 0.9 },
+    ceilColor: 0xf2fbff
+  });
+  ceilingLight(g, 0, 0, 0xffe9c0);
+
+  // Star stickers on the back wall
+  for (let i = 0; i < 14; i++) {
+    const st = new THREE.Mesh(new THREE.CircleGeometry(0.18 + Math.random() * 0.16, 5),
+      new THREE.MeshStandardMaterial({ color: 0xffd166, emissive: 0x554400 }));
+    st.position.set(-11 + Math.random() * 22, 5 + Math.random() * 4, -ROOM.d/2 + 0.12);
+    g.add(st);
+  }
+
+  const BUNK = 0x9a6b3f, SHEET = 0x5aa9e6, PINK = 0xd45d9e, GREEN = 0x4f9d5c;
+
+  // Bunk bed on the left — two levels, the top is a great vantage point
+  addBox(-8.5, 0, -5.0, 5.5, 1.6, 8.0, BUNK);                  // lower frame
+  addBox(-8.5, 1.6, -5.0, 5.3, 0.6, 7.8, SHEET);               // lower mattress
+  addBox(-8.5, 4.2, -5.0, 5.5, 0.5, 8.0, BUNK);                // upper deck
+  addBox(-8.5, 4.7, -5.0, 5.3, 0.6, 7.8, 0xf2a0c0);            // upper mattress
+  addBox(-11.1, 0, -5.0, 0.4, 5.6, 8.0, BUNK);                 // posts
+  addBox(-5.9, 0, -5.0, 0.4, 5.6, 8.0, BUNK);
+  // Ladder rungs up to the top bunk
+  for (let i = 0; i < 4; i++) addBox(-5.7, 1.0 + i * 0.9, -1.6, 1.6, 0.22, 0.3, 0xb98a52);
+
+  // Toy chest + lego stacks in the middle — the classic climbing route
+  addBox(1.5, 0, -2.0, 4.0, 2.0, 2.6, PINK);
+  addBox(1.5, 2.0, -2.0, 4.2, 0.3, 2.8, 0xe07ab0);             // lid
+  [[4.6, -0.2, 0xe4b23a, 0.9], [5.9, -1.4, 0x4668b5, 1.75], [4.9, -3.2, GREEN, 1.2]]
+    .forEach(([x, z, col, hgt]) => addBox(x, 0, z, 1.5, hgt, 1.5, col));
+
+  // Bookshelf with colourful spines
+  addBox(9.5, 0, -6.5, 1.6, 5.0, 6.0, 0xb98a52);
+  for (let i = 0; i < 8; i++) {
+    addBox(9.5, 0.6 + (i % 4) * 1.15, -8.6 + Math.floor(i / 4) * 2.4,
+      1.2, 0.9, 1.6, [0xc0392b, 0x2f7d6d, 0x8c4fb0, 0xd9b13a][i % 4]);
+  }
+
+  // Play mat + a slide (ramp) at the front — fun to run up
+  const mat = new THREE.Mesh(new THREE.CircleGeometry(4.2, 32),
+    new THREE.MeshStandardMaterial({ color: 0x7ec8a0, roughness: 1 }));
+  mat.rotation.x = -Math.PI/2; mat.position.set(2, 0.005, 5.5); g.add(mat);
+
+  addBox(8.0, 0, 6.5, 2.4, 2.8, 2.4, 0xffb020);                // slide tower
+  for (let i = 0; i < 6; i++) {                                 // stepped ramp down
+    addBox(6.0 - i * 0.9, 0, 6.5, 0.9, 2.4 - i * 0.4, 2.0, 0xffc44d);
+  }
+
+  // Giant teddy in the corner
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1.5, 18, 14),
+    new THREE.MeshStandardMaterial({ color: 0xb5793f, roughness: 0.9 }));
+  body.position.set(-9.5, 1.5, 6.5); body.castShadow = true; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.95, 16, 12),
+    new THREE.MeshStandardMaterial({ color: 0xc78a4c, roughness: 0.9 }));
+  head.position.set(-9.5, 3.4, 6.5); head.castShadow = true; g.add(head);
+  obstacles.push({ min: new THREE.Vector3(-11.0, 0, 5.0), max: new THREE.Vector3(-8.0, 4.3, 8.0) });
+
+  // Team-mode clutter
+  addBox(-2.0, 0, 8.0, 1.6, 1.0, 1.6, 0xd95f43, { extra: true });
+  addBox(-4.2, 0, 7.2, 1.4, 1.9, 1.4, 0x8c4fb0, { extra: true });
+  addBox(0.5, 0, 2.5, 1.8, 0.7, 1.8, 0x4f9d5c, { extra: true });
+}
+
+/* ---------------- BEDROOM 🛏️ ---------------- */
+function buildBedroom() {
+  const g = shellRoom({
+    floorMat: { map: woodTex, roughness: 0.75 },
+    wallMat: { color: 0xc6bcd6, roughness: 0.92 },
+    ceilColor: 0xefeaf5
+  });
+  ceilingLight(g, 0, 1, 0xffdca8);
+
+  const FRAME = 0x6b4a2f, DUVET = 0x4a6d8c, WARDROBE = 0x7a5c3c;
+
+  // Big double bed in the centre-back — the main platform
+  addBox(0, 0, -5.5, 9.0, 1.5, 7.0, FRAME);
+  addBox(0, 1.5, -5.5, 8.8, 0.9, 6.8, DUVET);                  // duvet
+  addBox(0, 2.4, -8.2, 8.4, 0.7, 1.4, 0xe8e2d5);               // pillows
+  addBox(0, 0, -9.2, 9.0, 4.2, 0.5, FRAME);                    // headboard
+
+  // Nightstands either side — first step onto the bed
+  [[-5.6, -8.0], [5.6, -8.0]].forEach(([x, z]) => {
+    addBox(x, 0, z, 2.2, 1.9, 2.2, FRAME);
+    addBox(x, 1.9, z, 2.4, 0.2, 2.4, 0x5a3d26);
+    const lampS = new THREE.Mesh(new THREE.ConeGeometry(0.65, 0.9, 16, 1, true),
+      new THREE.MeshStandardMaterial({ color: 0xf5e3b8, side: THREE.DoubleSide, emissive: 0x554422 }));
+    lampS.position.set(x, 2.7, z); g.add(lampS);
+    obstacles.push({ min: new THREE.Vector3(x - 0.65, 2.1, z - 0.65),
+                     max: new THREE.Vector3(x + 0.65, 3.2, z + 0.65) });
+  });
+
+  // Wardrobe along the right wall — tallest structure
+  addBox(10.5, 0, -1.0, 3.0, 7.0, 7.5, WARDROBE);
+  addBox(9.0, 3.4, -3.0, 0.12, 0.5, 0.12, 0xc9a227);           // handles
+  addBox(9.0, 3.4, 1.0, 0.12, 0.5, 0.12, 0xc9a227);
+  // Suitcase on top gives an extra ledge
+  addBox(10.5, 7.0, -1.0, 2.2, 0.9, 3.0, 0x8c4a3a);
+
+  // Chest of drawers + mirror on the left
+  addBox(-10.3, 0, 2.5, 2.6, 3.2, 5.0, WARDROBE);
+  for (let i = 0; i < 3; i++) addBox(-9.0, 0.6 + i * 1.0, 2.5, 0.14, 0.14, 4.4, 0xc9a227);
+  const mirror = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 4.0),
+    new THREE.MeshStandardMaterial({ color: 0xc9dbe6, roughness: 0.15, metalness: 0.55 }));
+  mirror.rotation.y = Math.PI/2; mirror.position.set(-ROOM.w/2 + 0.15, 5.6, 2.5); g.add(mirror);
+
+  // Rug and a laundry basket
+  const rug = new THREE.Mesh(new THREE.CircleGeometry(4.0, 40),
+    new THREE.MeshStandardMaterial({ color: 0x6b4a6b, roughness: 1 }));
+  rug.rotation.x = -Math.PI/2; rug.position.set(0, 0.004, 4.5); rug.receiveShadow = true; g.add(rug);
+  addBox(6.5, 0, 6.5, 2.0, 2.0, 2.0, 0xc9bfa8);
+
+  // Slippers and a book pile as low steps
+  addBox(-3.0, 0, 3.0, 1.0, 0.4, 2.0, 0xe08aa8);
+  addBox(-1.6, 0, 3.0, 1.0, 0.4, 2.0, 0xe08aa8);
+  addBook(3.5, 0, 2.0, 1.8, 0.5, 1.3, 0x2f7d6d);
+  addBook(3.4, 0.5, 1.9, 1.6, 0.45, 1.2, 0x7a3b8c);
+
+  // --- climbing route: cushions and a bench, low enough to start from the floor ---
+  addBox(4.0, 0, -2.6, 1.8, 1.0, 1.8, 0x9a86ad);               // floor cushion
+  addBox(4.0, 1.0, -2.6, 1.6, 0.9, 1.6, 0x8a5f7a);             // -> 1.9
+  addBox(2.2, 0, -3.6, 2.6, 1.0, 1.4, 0x59402c);               // bench at the foot of the bed
+  addBox(2.2, 1.0, -3.6, 2.4, 0.7, 1.2, 0xb9a887);             // -> 1.7
+  addBox(-6.0, 0, -5.0, 1.7, 1.0, 1.7, 0x9a86ad);              // cushion on the far side
+  addBox(-6.0, 1.0, -5.0, 1.5, 0.9, 1.5, 0x8a5f7a);
+  addBox(6.2, 0, 0.6, 1.7, 1.0, 1.7, 0x59402c);                // step towards the chests
+  addBox(6.2, 1.0, 0.6, 1.5, 0.9, 1.5, 0x6b4a30);
+
+  // Team-mode clutter
+  addBox(-6.0, 0, 7.5, 1.8, 1.2, 1.8, 0x8a6a3f, { extra: true });
+  addBox(1.5, 0, 8.2, 2.2, 0.9, 1.6, 0x5a8c6e, { extra: true });
+  addBox(8.5, 0, 3.0, 1.4, 1.8, 1.4, 0x9a6b3f, { extra: true });
+}
+
 /* ---------------- map registry ---------------- */
 const MAPS = {
   living: { name: 'Living Room', emoji: '🛋️', build: buildLivingRoom,
             preview: { pos: [11, 7.5, 13], look: [0, 2.5, -1] } },
   gym:    { name: 'The Gym',     emoji: '💪', build: buildGym,
-            preview: { pos: [12, 8, 12], look: [0, 2.5, -1] } }
+            preview: { pos: [12, 8, 12], look: [0, 2.5, -1] } },
+  office: { name: 'The Office',   emoji: '🖥️', build: buildOffice,
+            preview: { pos: [12, 8.5, 12], look: [0, 2.5, -2] } },
+  kitchen:{ name: 'The Kitchen',  emoji: '🍳', build: buildKitchen,
+            preview: { pos: [11, 8, 13], look: [0, 3, -3] } },
+  kids:   { name: 'Kids Room',    emoji: '🧸', build: buildKidsRoom,
+            preview: { pos: [12, 8, 13], look: [-1, 3, -2] } },
+  bedroom:{ name: 'The Bedroom',  emoji: '🛏️', build: buildBedroom,
+            preview: { pos: [12, 8.5, 12], look: [0, 3, -4] } }
 };
 const MAP_KEYS = Object.keys(MAPS);
 let currentMapKey = 'living';
@@ -1489,6 +1837,18 @@ function formatTime(t) {
 /* ---------- Map selection + loading screen ---------- */
 let mapChoice = 'random';        // what the host picked ('random' or a map key)
 let pendingMapKey = null;        // resolved map for the match about to start
+
+/* One button per registered map — adding a map to MAPS is enough to list it here */
+(function buildMapPicker() {
+  const row = document.getElementById('mapRow');
+  MAP_KEYS.forEach(key => {
+    const b = document.createElement('button');
+    b.className = 'pill mapBtn';
+    b.dataset.map = key;
+    b.textContent = MAPS[key].emoji + ' ' + MAPS[key].name;
+    row.appendChild(b);
+  });
+})();
 
 document.querySelectorAll('.mapBtn').forEach(btn => {
   btn.addEventListener('click', () => {
