@@ -203,6 +203,23 @@
     background: linear-gradient(90deg, #ffd166, #ff9f43);
     transition: width 0.25s linear;
   }
+  .setGroup {
+    width: min(560px, 90vw); margin: 10px 0; padding: 14px 20px 16px;
+    background: rgba(255,255,255,0.045); border: 1px solid #3a3a52; border-radius: 14px;
+  }
+  .setTitle {
+    font-size: 15px; letter-spacing: 2px; text-transform: uppercase;
+    color: #ffd166; margin-bottom: 10px; text-align: left;
+  }
+  .setRow { display: flex; align-items: center; gap: 12px; margin: 9px 0; }
+  .setLabel { flex: 1; text-align: left; font-size: 17px; color: #d8d8e8; }
+  .setVal { width: 46px; text-align: right; font-size: 15px; color: #9a9ab4; font-family: monospace; }
+  .setRow input[type=range] {
+    flex: 0 0 210px; accent-color: #ffd166; height: 4px; cursor: pointer;
+  }
+  .pill.toggle { min-width: 78px; font-size: 15px; padding: 6px 16px; }
+  .pill.toggle.on { background: #ffd166; color: #222; border-color: #ffd166; font-weight: 700; }
+  .qBtn { font-size: 15px; padding: 6px 16px; }
   #netMsg {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 9;
     background: rgba(20,20,30,0.85); color: #ffd166; font-size: 22px; font-weight: 700;
@@ -341,6 +358,7 @@
   </div>
 
   <button id="playBtn" class="hidden">▶ PLAY</button>
+  <button class="menuBtn" id="openSettingsBtn" style="width:200px;font-size:17px;padding:9px 0">⚙️ SETTINGS</button>
   <button class="menuBtn hidden" id="menuBackBtn" style="width:200px; font-size:17px; padding:9px 0">← BACK</button>
 
   <div id="controlsHint">
@@ -393,12 +411,65 @@
   </div>
 </div>
 
+<!-- SETTINGS -->
+<div id="settingsMenu" class="menu hidden">
+  <h2>⚙️ SETTINGS</h2>
+
+  <div class="setGroup">
+    <div class="setTitle">Controls</div>
+    <div class="setRow">
+      <span class="setLabel">Mouse sensitivity</span>
+      <input id="sensSlider" type="range" min="20" max="300" value="100">
+      <span id="sensVal" class="setVal">1.00</span>
+    </div>
+    <div class="setRow">
+      <span class="setLabel">Invert vertical look</span>
+      <button id="invertBtn" class="pill toggle">OFF</button>
+    </div>
+    <div class="setRow">
+      <span class="setLabel">Field of view</span>
+      <input id="fovSlider" type="range" min="60" max="100" value="74">
+      <span id="fovVal" class="setVal">74</span>
+    </div>
+  </div>
+
+  <div class="setGroup">
+    <div class="setTitle">Audio</div>
+    <div class="setRow">
+      <span class="setLabel">Sound effects</span>
+      <input id="sfxSlider" type="range" min="0" max="100" value="70">
+      <span id="sfxVal" class="setVal">70</span>
+    </div>
+  </div>
+
+  <div class="setGroup">
+    <div class="setTitle">Display</div>
+    <div class="setRow">
+      <span class="setLabel">Shadows</span>
+      <button id="shadowBtn" class="pill toggle on">ON</button>
+    </div>
+    <div class="setRow">
+      <span class="setLabel">Show FPS &amp; network</span>
+      <button id="statsBtn" class="pill toggle">OFF</button>
+    </div>
+    <div class="setRow">
+      <span class="setLabel">Graphics quality</span>
+      <button class="pill qBtn" data-q="low">Low</button>
+      <button class="pill qBtn selected" data-q="high">High</button>
+    </div>
+  </div>
+
+  <button class="menuBtn primary" id="setBackBtn">BACK</button>
+  <button class="menuBtn" id="setResetBtn" style="width:200px;font-size:16px;padding:9px 0">RESET TO DEFAULTS</button>
+</div>
+
 <!-- PAUSE MENU -->
 <div id="pauseMenu" class="menu hidden">
   <h2 id="pauseTitle">⏸ PAUSED</h2>
   <div id="liveWarn" class="liveWarn hidden">⚠️ The match is still running — your rival isn't waiting!</div>
   <button class="menuBtn primary" id="resumeBtn">RESUME GAME</button>
   <button class="menuBtn" id="rematchBtn">REMATCH</button>
+  <button class="menuBtn" id="pauseSettingsBtn">⚙️ SETTINGS</button>
   <button class="menuBtn" id="pauseMainBtn">MAIN MENU</button>
 </div>
 
@@ -1265,14 +1336,16 @@ function buildKidsRoom() {
   addBox(-8.5, 4.7, -5.0, 5.3, 0.6, 7.8, 0xf2a0c0);            // upper mattress
   addBox(-11.1, 0, -5.0, 0.4, 5.6, 8.0, BUNK);                 // posts
   addBox(-5.9, 0, -5.0, 0.4, 5.6, 8.0, BUNK);
-  /* Stairs up to the top bunk. These used to be thin rungs you could barely land
-     on, and the top one was a 1.4m jump short of the mattress — so a balloon that
-     settled up there ended the match. Wide treads, ≤0.8m rises, all the way up. */
-  const stepX = -5.4, stepZ = -1.2;
-  [[0, 0.8], [0.8, 0.8], [1.6, 0.8], [2.4, 0.8], [3.2, 0.8], [4.0, 0.9]]
-    .forEach(([y, h], i) => addBox(stepX + i * 0.05, y, stepZ, 2.2, h, 1.5, i % 2 ? 0xb98a52 : 0xc79a62));
-  // Landing that meets the upper mattress (top at 5.3)
-  addBox(-6.2, 4.9, -1.6, 2.0, 0.5, 1.6, 0xb98a52);
+  /* Staircase up to the top bunk (mattress top is 5.3).
+     Each tread needs its OWN footprint — stacking them on one spot just builds a
+     wall with nothing to stand on, which is why this was unclimbable before.
+     Treads march along z beside the bed, rising 0.85 each (a jump clears ~1.04). */
+  const stairX = -4.7;                       // clear of the bed frame and its posts
+  [[-1.4, 0.85], [-2.8, 1.70], [-4.2, 2.55], [-5.6, 3.40], [-7.0, 4.25], [-8.4, 5.10]]
+    .forEach(([z, top], i) =>
+      addBox(stairX, 0, z, 1.7, top, 1.30, i % 2 ? 0xb98a52 : 0xc79a62));
+  // Landing bridging the last tread to the mattress
+  addBox(-5.8, 5.10, -8.4, 1.6, 0.2, 1.30, 0xa87c48);
 
   // Toy chest + lego stacks in the middle — the classic climbing route
   addBox(1.5, 0, -2.0, 4.0, 2.0, 2.6, PINK);
@@ -1642,10 +1715,15 @@ addEventListener('mousemove', e => {
   const me = myPlayer();
   // movementX/Y is only reliable while the pointer is locked; without a lock the
   // browser clamps it at the window edges, which felt like lag and drift.
-  const mx = e.movementX || 0, my = e.movementY || 0;
+  const rawX = e.movementX || 0, rawY = e.movementY || 0;
+  // Check the RAW movement against the stray-jump limit first; scaling it by
+  // sensitivity beforehand made high-sensitivity players' input get discarded.
   if (!document.pointerLockElement) {
-    if (Math.abs(mx) > 120 || Math.abs(my) > 120) return;   // ignore jumps from re-entering the window
+    if (Math.abs(rawX) > 120 || Math.abs(rawY) > 120) return;
   }
+  const sens = settings.sensitivity;
+  const mx = rawX * sens;
+  const my = rawY * sens * (settings.invertY ? -1 : 1);
   me.yaw   -= mx * 0.0023;
   me.pitch -= my * 0.0023;
   me.pitch = Math.max(-1.35, Math.min(1.35, me.pitch));
@@ -1846,6 +1924,104 @@ function formatTime(t) {
 }
 
 /* ================= MENU LOGIC ================= */
+/* ---------- Settings ---------- */
+/* Artifacts can't use browser storage, so settings live for the session only. */
+const settings = {
+  sensitivity: 1.0,
+  invertY: false,
+  fov: 74,
+  sfx: 70,
+  shadows: true,
+  showStats: false,
+  quality: 'high'
+};
+const DEFAULT_SETTINGS = Object.assign({}, settings);
+
+function applySettings() {
+  camera1.fov = settings.fov;
+  camera2.fov = settings.fov;
+  camera1.updateProjectionMatrix();
+  camera2.updateProjectionMatrix();
+
+  renderer.shadowMap.enabled = settings.shadows;
+
+  renderer.setPixelRatio(settings.quality === 'high'
+    ? Math.min(devicePixelRatio, 2) : 1);
+
+  netDebug.on = settings.showStats;
+  netDebugEl.style.display = settings.showStats ? 'block' : 'none';
+}
+
+function syncSettingsUI() {
+  document.getElementById('sensSlider').value = Math.round(settings.sensitivity * 100);
+  document.getElementById('sensVal').textContent = settings.sensitivity.toFixed(2);
+  document.getElementById('fovSlider').value = settings.fov;
+  document.getElementById('fovVal').textContent = settings.fov;
+  document.getElementById('sfxSlider').value = settings.sfx;
+  document.getElementById('sfxVal').textContent = settings.sfx;
+  const inv = document.getElementById('invertBtn');
+  inv.textContent = settings.invertY ? 'ON' : 'OFF';
+  inv.classList.toggle('on', settings.invertY);
+  const sh = document.getElementById('shadowBtn');
+  sh.textContent = settings.shadows ? 'ON' : 'OFF';
+  sh.classList.toggle('on', settings.shadows);
+  const st = document.getElementById('statsBtn');
+  st.textContent = settings.showStats ? 'ON' : 'OFF';
+  st.classList.toggle('on', settings.showStats);
+  document.querySelectorAll('.qBtn').forEach(b =>
+    b.classList.toggle('selected', b.dataset.q === settings.quality));
+}
+
+const settingsMenu = document.getElementById('settingsMenu');
+let settingsReturnTo = 'main';       // which screen sent us here
+
+function openSettings(from) {
+  settingsReturnTo = from || 'main';
+  mainMenu.classList.add('hidden');
+  pauseMenu.classList.add('hidden');
+  syncSettingsUI();
+  settingsMenu.classList.remove('hidden');
+}
+
+function closeSettings() {
+  settingsMenu.classList.add('hidden');
+  if (settingsReturnTo === 'pause') pauseMenu.classList.remove('hidden');
+  else mainMenu.classList.remove('hidden');
+}
+
+document.getElementById('sensSlider').addEventListener('input', e => {
+  settings.sensitivity = parseInt(e.target.value, 10) / 100;
+  document.getElementById('sensVal').textContent = settings.sensitivity.toFixed(2);
+});
+document.getElementById('fovSlider').addEventListener('input', e => {
+  settings.fov = parseInt(e.target.value, 10);
+  document.getElementById('fovVal').textContent = settings.fov;
+  applySettings();
+});
+document.getElementById('sfxSlider').addEventListener('input', e => {
+  settings.sfx = parseInt(e.target.value, 10);
+  document.getElementById('sfxVal').textContent = settings.sfx;
+});
+document.getElementById('invertBtn').addEventListener('click', () => {
+  settings.invertY = !settings.invertY; syncSettingsUI();
+});
+document.getElementById('shadowBtn').addEventListener('click', () => {
+  settings.shadows = !settings.shadows; applySettings(); syncSettingsUI();
+});
+document.getElementById('statsBtn').addEventListener('click', () => {
+  settings.showStats = !settings.showStats; applySettings(); syncSettingsUI();
+});
+document.querySelectorAll('.qBtn').forEach(b => b.addEventListener('click', () => {
+  settings.quality = b.dataset.q; applySettings(); syncSettingsUI();
+}));
+document.getElementById('openSettingsBtn').addEventListener('click', () => openSettings('main'));
+document.getElementById('pauseSettingsBtn').addEventListener('click', () => openSettings('pause'));
+document.getElementById('setBackBtn').addEventListener('click', closeSettings);
+document.getElementById('setResetBtn').addEventListener('click', () => {
+  Object.assign(settings, DEFAULT_SETTINGS);
+  applySettings(); syncSettingsUI();
+});
+
 /* ---------- Map selection + loading screen ---------- */
 let mapChoice = 'random';        // what the host picked ('random' or a map key)
 let pendingMapKey = null;        // resolved map for the match about to start
@@ -3473,6 +3649,8 @@ function updateAspect() {
   } else {
     camera1.aspect = innerWidth/innerHeight;
   }
+  camera1.fov = settings.fov;
+  camera2.fov = settings.fov;
   camera1.updateProjectionMatrix();
   camera2.updateProjectionMatrix();
 }
