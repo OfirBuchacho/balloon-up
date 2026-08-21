@@ -1453,6 +1453,10 @@ function otherTeam(t) { return t === 1 ? 2 : 1; }
 function isTeamMode() { return matchMode === '2v2'; }
 let restTimer = 0;       // how long the balloon has been parked on furniture
 let strandedFor = 0;     // how long the balloon has been parked out of play
+let strandedAnchor = null;  // where it was when it stopped going anywhere
+let restPerchY = 0;      // height of the surface it's parked on (0 = not parked)
+const REST_GRACE = 2.5;  // seconds a parked balloon is left alone so players can reach it
+const HIGH_PERCH = 2.2;  // above this, a perch may be genuinely unreachable
 let floorStuck = 0;      // watchdog: balloon lying on the floor with no round resolving
 
 function updateBalloonRemote(dt) {
@@ -2863,17 +2867,62 @@ function floorWatchdog(dt) {
 /* Absolute guarantee: however clever a map's geometry gets, a balloon that has
    been parked out of play for too long is returned to the centre of the room.
    Physics alone can't promise this for every alcove in every future map. */
+function activeLocalPlayers() {
+  return (mode === 'free') ? [p1] : [p1, p2];
+}
+
+/* Somewhere with clear floor beneath it — dropping the balloon straight back onto
+   the furniture it was stuck on (the kitchen island sits dead centre) just repeats
+   the problem. */
+function clearAirSpot() {
+  const candidates = [[0, 0.5], [0, 5], [0, -5], [5, 2], [-5, 2], [7, -3], [-7, -3], [4, 6], [-4, 6]];
+  for (const [x, z] of candidates) {
+    const blocked = obstacles.some(b => {
+      if (b.extra && !extrasEnabled) return false;
+      return b.max.y > 1.0 &&
+             x > b.min.x - BALLOON_R && x < b.max.x + BALLOON_R &&
+             z > b.min.z - BALLOON_R && z < b.max.z + BALLOON_R;
+    });
+    if (!blocked) return { x, z };
+  }
+  return { x: 0, z: 0.5 };
+}
+
 function balloonSafetyValve(dt) {
   const onFloor = balloon.position.y <= BALLOON_R * 1.12 + 0.05;
-  if (onFloor || roundPause > 0) { strandedFor = 0; return; }
+  if (onFloor || roundPause > 0) { strandedFor = 0; strandedAnchor = null; return; }
 
-  // Count time since the balloon was last actually hit. The escape shoves briefly
-  // speed it up, so keying off speed let the timer reset forever.
-  if (restTimer > 0 || balloonVel.length() < 2.5) strandedFor += dt;
-  if (strandedFor < 4) return;
+  /* Only step in when the balloon is genuinely PARKED on a high surface.
+     A balloon drifting slowly through open air is normal play — treating that as
+     "stuck" teleported it away mid-rally. restTimer is only non-zero while it is
+     actually sitting on something. */
+  const highUp = balloon.position.y > 2.2;          // low ledges are reachable anyway
+  if (!highUp) { strandedFor = 0; strandedAnchor = null; return; }
+
+  /* "Stuck" means it stays high AND barely goes anywhere — that covers a balloon
+     resting on a wardrobe and one rattling around inside a shelf recess, while a
+     balloon crossing the room in normal play always travels far enough to reset. */
+  if (!strandedAnchor) strandedAnchor = { x: balloon.position.x, z: balloon.position.z };
+  const wandered = Math.hypot(balloon.position.x - strandedAnchor.x,
+                              balloon.position.z - strandedAnchor.z);
+  if (wandered > 3.0) { strandedFor = 0; strandedAnchor = null; return; }
+
+  // Give players a real chance: if someone is close enough to swing, hold off.
+  const contenders = online ? players.filter(pl => pl.active) : activeLocalPlayers();
+  const someoneClose = contenders.some(pl => {
+    const eye = pl.pos.y + PLAYER.height;
+    return Math.hypot(pl.pos.x - balloon.position.x, pl.pos.z - balloon.position.z) < 4.0 &&
+           Math.abs(eye - balloon.position.y) < 3.0;
+  });
+  if (someoneClose) { strandedFor = Math.min(strandedFor, 1.5); return; }
+
+  strandedFor += dt;
+  if (strandedFor < 5) return;                       // ~5s parked, nobody coming
   strandedFor = 0;
+  strandedAnchor = null;
 
-  balloon.position.set(0, ROOM.h * 0.6, 0.5);
+  const spot = clearAirSpot();
+  balloon.position.set(spot.x, ROOM.h * 0.6, spot.z);
   balloonVel.set((Math.random() - 0.5) * 1.2, 0.4, (Math.random() - 0.5) * 1.2);
   balloonAngVel.set(0, 0, 0);
   restTimer = 0;
@@ -2902,9 +2951,16 @@ function nudgeRestingBalloon(dt) {
     if (balloon.position.z < box.min.z - BALLOON_R || balloon.position.z > box.max.z + BALLOON_R) continue;
     if (!perch || box.max.y > perch.max.y) perch = box;
   }
-  if (!perch) { restTimer = 0; return; }
+  if (!perch) { restTimer = 0; restPerchY = 0; return; }
 
   restTimer += dt;
+  restPerchY = perch.max.y;
+
+  // Hands off at first: this is a chance for someone to climb up and smack it.
+  if (restTimer < REST_GRACE) {
+    balloonVel.y += Math.sin(performance.now() * 0.004) * 0.25 * dt;   // gentle bob only
+    return;
+  }
 
   /* Work out the shortest way OFF this surface that doesn't end at a wall.
      Big furniture (a bunk bed) needs a real shove, not a nudge — that's how the
@@ -2940,11 +2996,12 @@ function nudgeRestingBalloon(dt) {
   }
 
   const heightUrgency = 1 + Math.max(0, perch.max.y - 2) * 0.6;
-  const push = (1.8 + restTimer * 2.4) * heightUrgency;
+  const nagging = restTimer - REST_GRACE;
+  const push = (1.8 + nagging * 2.4) * heightUrgency;
   balloonVel.addScaledVector(exit.dir, push * dt);
 
   // Still parked after a moment? Launch it hard enough to actually clear the edge.
-  if (restTimer > 1.2) {
+  if (nagging > 1.2) {
     // Deep alcoves (under a bunk) need real speed to clear before drag eats it
     const needed = (exit.dist + BALLOON_R + 1.2) / 0.55;
     balloonVel.addScaledVector(exit.dir, Math.max(3.0, Math.min(14, needed)));
