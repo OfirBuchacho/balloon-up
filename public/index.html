@@ -1265,8 +1265,14 @@ function buildKidsRoom() {
   addBox(-8.5, 4.7, -5.0, 5.3, 0.6, 7.8, 0xf2a0c0);            // upper mattress
   addBox(-11.1, 0, -5.0, 0.4, 5.6, 8.0, BUNK);                 // posts
   addBox(-5.9, 0, -5.0, 0.4, 5.6, 8.0, BUNK);
-  // Ladder rungs up to the top bunk
-  for (let i = 0; i < 4; i++) addBox(-5.7, 1.0 + i * 0.9, -1.6, 1.6, 0.22, 0.3, 0xb98a52);
+  /* Stairs up to the top bunk. These used to be thin rungs you could barely land
+     on, and the top one was a 1.4m jump short of the mattress — so a balloon that
+     settled up there ended the match. Wide treads, ≤0.8m rises, all the way up. */
+  const stepX = -5.4, stepZ = -1.2;
+  [[0, 0.8], [0.8, 0.8], [1.6, 0.8], [2.4, 0.8], [3.2, 0.8], [4.0, 0.9]]
+    .forEach(([y, h], i) => addBox(stepX + i * 0.05, y, stepZ, 2.2, h, 1.5, i % 2 ? 0xb98a52 : 0xc79a62));
+  // Landing that meets the upper mattress (top at 5.3)
+  addBox(-6.2, 4.9, -1.6, 2.0, 0.5, 1.6, 0xb98a52);
 
   // Toy chest + lego stacks in the middle — the classic climbing route
   addBox(1.5, 0, -2.0, 4.0, 2.0, 2.6, PINK);
@@ -1446,6 +1452,7 @@ function teamOf(num) { const p = playerByNum(num); return p ? p.team : 0; }
 function otherTeam(t) { return t === 1 ? 2 : 1; }
 function isTeamMode() { return matchMode === '2v2'; }
 let restTimer = 0;       // how long the balloon has been parked on furniture
+let strandedFor = 0;     // how long the balloon has been parked out of play
 let floorStuck = 0;      // watchdog: balloon lying on the floor with no round resolving
 
 function updateBalloonRemote(dt) {
@@ -1496,6 +1503,7 @@ function resetBalloon() {
   lastTeam = 0;
   lastSlapAt = -99;
   restTimer = 0;
+  strandedFor = 0;
   floorStuck = 0;
   if (typeof balloonNet !== 'undefined') balloonNet.has = false;
   if (typeof updateTurnUI === 'function') updateTurnUI();
@@ -2472,6 +2480,10 @@ function connectSocket() {
       roundMsgEl.textContent = d.msg;
       roundMsgEl.style.display = 'block';
       roundPause = 1.6;
+    } else if (d.t === 'freed') {
+      roundMsgEl.textContent = 'Balloon was stuck — back in play! 🎈';
+      roundMsgEl.style.display = 'block';
+      setTimeout(() => { if (roundPause <= 0) roundMsgEl.style.display = 'none'; }, 1600);
     } else if (d.t === 'serve') {
       roundPause = 0;
       roundMsgEl.style.display = 'none';
@@ -2848,38 +2860,99 @@ function floorWatchdog(dt) {
   }
 }
 
+/* Absolute guarantee: however clever a map's geometry gets, a balloon that has
+   been parked out of play for too long is returned to the centre of the room.
+   Physics alone can't promise this for every alcove in every future map. */
+function balloonSafetyValve(dt) {
+  const onFloor = balloon.position.y <= BALLOON_R * 1.12 + 0.05;
+  if (onFloor || roundPause > 0) { strandedFor = 0; return; }
+
+  // Count time since the balloon was last actually hit. The escape shoves briefly
+  // speed it up, so keying off speed let the timer reset forever.
+  if (restTimer > 0 || balloonVel.length() < 2.5) strandedFor += dt;
+  if (strandedFor < 4) return;
+  strandedFor = 0;
+
+  balloon.position.set(0, ROOM.h * 0.6, 0.5);
+  balloonVel.set((Math.random() - 0.5) * 1.2, 0.4, (Math.random() - 0.5) * 1.2);
+  balloonAngVel.set(0, 0, 0);
+  restTimer = 0;
+
+  roundMsgEl.textContent = 'Balloon was stuck — back in play! 🎈';
+  roundMsgEl.style.display = 'block';
+  setTimeout(() => { if (roundPause <= 0) roundMsgEl.style.display = 'none'; }, 1600);
+  if (online && isHost && socket) socket.emit('event', { t: 'freed' });
+}
+
 function nudgeRestingBalloon(dt) {
   const speed = balloonVel.length();
   const onFloor = balloon.position.y <= BALLOON_R * 1.12 + 0.05;
 
-  if (speed > 0.9 || onFloor) { restTimer = 0; return; }
+  // Only a genuine throw counts as "in play". The gentle drift below raises the
+  // speed itself, and using a low threshold here reset the timer every frame —
+  // which meant the decisive shove never fired and the balloon stayed stranded.
+  if (speed > 2.5 || onFloor) { restTimer = 0; return; }
 
-  // Is it sitting on top of something?
   let perch = null;
   for (const box of obstacles) {
     if (box.extra && !extrasEnabled) continue;
-    if (balloon.position.y > box.max.y + BALLOON_R * 1.4) continue;
+    if (balloon.position.y > box.max.y + BALLOON_R * 1.6) continue;
     if (balloon.position.y < box.max.y) continue;
     if (balloon.position.x < box.min.x - BALLOON_R || balloon.position.x > box.max.x + BALLOON_R) continue;
     if (balloon.position.z < box.min.z - BALLOON_R || balloon.position.z > box.max.z + BALLOON_R) continue;
-    perch = box;
-    break;
+    if (!perch || box.max.y > perch.max.y) perch = box;
   }
   if (!perch) { restTimer = 0; return; }
 
   restTimer += dt;
 
-  // Push toward whichever edge of the perch is closest, so it slides off naturally
-  const dxMin = balloon.position.x - perch.min.x, dxMax = perch.max.x - balloon.position.x;
-  const dzMin = balloon.position.z - perch.min.z, dzMax = perch.max.z - balloon.position.z;
-  const m = Math.min(dxMin, dxMax, dzMin, dzMax);
-  const push = 0.9 + restTimer * 1.4;          // grows the longer it overstays
-  if (m === dxMin)      balloonVel.x -= push * dt;
-  else if (m === dxMax) balloonVel.x += push * dt;
-  else if (m === dzMin) balloonVel.z -= push * dt;
-  else                  balloonVel.z += push * dt;
+  /* Work out the shortest way OFF this surface that doesn't end at a wall.
+     Big furniture (a bunk bed) needs a real shove, not a nudge — that's how the
+     balloon used to strand itself out of reach and stall the whole match. */
+  const p = balloon.position;
+  const margin = 1.2;                       // how much clear floor we want beyond the edge
+  const exits = [
+    { dir: new THREE.Vector3(-1, 0, 0), dist: p.x - perch.min.x, beyond: perch.min.x - margin, axis: 'x', sign: -1 },
+    { dir: new THREE.Vector3( 1, 0, 0), dist: perch.max.x - p.x, beyond: perch.max.x + margin, axis: 'x', sign:  1 },
+    { dir: new THREE.Vector3(0, 0, -1), dist: p.z - perch.min.z, beyond: perch.min.z - margin, axis: 'z', sign: -1 },
+    { dir: new THREE.Vector3(0, 0,  1), dist: perch.max.z - p.z, beyond: perch.max.z + margin, axis: 'z', sign:  1 }
+  ].filter(e => {
+    const limit = e.axis === 'x' ? ROOM.w/2 : ROOM.d/2;      // must not lead into a wall
+    if (Math.abs(e.beyond) >= limit - BALLOON_R) return false;
+    // ...and must not be walled in by something taller (bunk-bed posts did exactly this)
+    const probe = { x: p.x + e.dir.x * (e.dist + BALLOON_R + 0.5),
+                    z: p.z + e.dir.z * (e.dist + BALLOON_R + 0.5) };
+    return !obstacles.some(b => {
+      if (b === perch) return false;
+      if (b.extra && !extrasEnabled) return false;
+      if (b.max.y < p.y + BALLOON_R * 0.5) return false;      // low enough to fly over
+      return probe.x > b.min.x - BALLOON_R && probe.x < b.max.x + BALLOON_R &&
+             probe.z > b.min.z - BALLOON_R && probe.z < b.max.z + BALLOON_R;
+    });
+  });
 
-  // A little bob, so it reads as a floating balloon rather than a dead prop
+  let exit;
+  if (exits.length) {
+    exit = exits.reduce((a, b) => (a.dist <= b.dist ? a : b));
+  } else {
+    // Boxed in on every side — lift it clear over whatever is penning it in
+    exit = { dir: new THREE.Vector3(-(Math.sign(p.x) || 1), 0, 0), dist: 3, penned: true };
+  }
+
+  const heightUrgency = 1 + Math.max(0, perch.max.y - 2) * 0.6;
+  const push = (1.8 + restTimer * 2.4) * heightUrgency;
+  balloonVel.addScaledVector(exit.dir, push * dt);
+
+  // Still parked after a moment? Launch it hard enough to actually clear the edge.
+  if (restTimer > 1.2) {
+    // Deep alcoves (under a bunk) need real speed to clear before drag eats it
+    const needed = (exit.dist + BALLOON_R + 1.2) / 0.55;
+    balloonVel.addScaledVector(exit.dir, Math.max(3.0, Math.min(14, needed)));
+    balloonVel.y += exit.penned ? 5.5 : 2.2;                 // penned in? go up and over
+    balloonAngVel.y += 3;
+    restTimer = 0;
+  }
+
   balloonVel.y += Math.sin(performance.now() * 0.004) * 0.35 * dt;
   balloonAngVel.y += 0.4 * dt;
 }
@@ -2929,6 +3002,7 @@ function updateBalloon(dt) {
     collideBalloonWithBox(box);
   }
   nudgeRestingBalloon(dt);
+  balloonSafetyValve(dt);
   floorWatchdog(dt);
   activePlayers().forEach(pl => playerPushesBalloon(pl, pl.num));
 
