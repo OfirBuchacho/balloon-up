@@ -50,13 +50,35 @@
   }
   .chargeFill { height: 100%; width: 0%; }
   .dashInd {
-    position: fixed; bottom: 24px; z-index: 5; transform: translateX(-50%);
-    width: 30px; height: 30px; line-height: 28px; text-align: center;
-    font-size: 15px; font-weight: 800; color: #ffd166;
-    background: rgba(20,20,30,0.55); border: 2px solid #ffd166; border-radius: 50%;
-    pointer-events: none;
+    position: fixed; bottom: 18px; z-index: 5; transform: translateX(-50%);
+    width: 46px; height: 46px; pointer-events: none;
   }
-  .dashInd.cooling { color: #778; border-color: #556; }
+  .dashInd svg { width: 46px; height: 46px; transform: rotate(-90deg); }
+  .dashTrack { fill: rgba(20,20,30,0.6); stroke: rgba(255,255,255,0.18); stroke-width: 3; }
+  .dashFill {
+    fill: none; stroke: #ffd166; stroke-width: 3.5; stroke-linecap: round;
+    stroke-dasharray: 113; stroke-dashoffset: 0;
+  }
+  .dashInd .dashIcon {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 17px; color: #ffd166;
+  }
+  .dashInd .dashSecs {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 800; color: #8a8aa0; font-family: monospace;
+  }
+  /* While recharging: dim the bolt, show the countdown, drain the ring */
+  .dashInd.cooling .dashFill { stroke: #6a6a86; }
+  .dashInd.cooling .dashIcon { display: none; }
+  .dashInd.cooling .dashSecs { display: flex; }
+  /* A quick flash the moment it becomes available again */
+  .dashInd.ready .dashTrack { stroke: #ffd166; }
+  .dashInd.ready { animation: dashPop 0.45s ease-out; }
+  @keyframes dashPop {
+    0%   { transform: translateX(-50%) scale(1); filter: brightness(2.2); }
+    45%  { transform: translateX(-50%) scale(1.28); filter: brightness(2.2); }
+    100% { transform: translateX(-50%) scale(1); filter: brightness(1); }
+  }
   .playerFrame {
     position: fixed; top: 0; bottom: 0; width: 50%; z-index: 4;
     pointer-events: none; box-sizing: border-box; border: 5px solid transparent;
@@ -244,6 +266,22 @@
   }
   .optWrap { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; }
   .matchDivider { height: 1px; background: #3a3a52; margin: 14px 0 4px; }
+  .bindRow { display: flex; align-items: center; gap: 12px; margin: 7px 0; }
+  .bindLabel { flex: 1; text-align: left; font-size: 16px; color: #d8d8e8; }
+  .bindKey {
+    min-width: 104px; font-family: inherit; font-size: 15px; font-weight: 700;
+    padding: 6px 14px; border-radius: 8px; cursor: pointer;
+    background: rgba(255,255,255,0.08); color: #ffd166; border: 2px solid #556;
+    transition: all 0.12s;
+  }
+  .bindKey:hover { border-color: #99a; }
+  .bindKey.listening {
+    background: #ffd166; color: #222; border-color: #fff;
+    animation: bindPulse 0.8s ease-in-out infinite;
+  }
+  .bindKey.clash { border-color: #ff6b6b; color: #ff6b6b; }
+  @keyframes bindPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+  .bindHint { font-size: 13px; color: #8a8aa0; text-align: left; margin-top: 8px; }
   #netMsg {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 9;
     background: rgba(20,20,30,0.85); color: #ffd166; font-size: 22px; font-weight: 700;
@@ -285,8 +323,22 @@
 <div id="ch2" class="crosshair hidden"></div>
 <div id="chargeWrap1" class="chargeWrap hidden"><div id="chargeFill1" class="chargeFill"></div></div>
 <div id="chargeWrap2" class="chargeWrap hidden"><div id="chargeFill2" class="chargeFill"></div></div>
-<div id="dash1" class="dashInd hidden">⚡</div>
-<div id="dash2" class="dashInd hidden">⚡</div>
+<div id="dash1" class="dashInd hidden">
+  <svg viewBox="0 0 44 44">
+    <circle class="dashTrack" cx="22" cy="22" r="18"></circle>
+    <circle class="dashFill" cx="22" cy="22" r="18"></circle>
+  </svg>
+  <span class="dashIcon">⚡</span>
+  <span class="dashSecs"></span>
+</div>
+<div id="dash2" class="dashInd hidden">
+  <svg viewBox="0 0 44 44">
+    <circle class="dashTrack" cx="22" cy="22" r="18"></circle>
+    <circle class="dashFill" cx="22" cy="22" r="18"></circle>
+  </svg>
+  <span class="dashIcon">⚡</span>
+  <span class="dashSecs"></span>
+</div>
 
 <!-- MAIN MENU -->
 <div id="mainMenu" class="menu">
@@ -473,6 +525,13 @@
       <input id="fovSlider" type="range" min="60" max="110" value="74">
       <span id="fovVal" class="setVal">74</span>
     </div>
+  </div>
+
+  <div class="setGroup">
+    <div class="setTitle">Key bindings</div>
+    <div id="bindRows"></div>
+    <div id="bindHint" class="bindHint">Click a key to change it, then press the new one. Esc cancels.</div>
+    <button class="pill" id="bindResetBtn" style="margin-top:8px;font-size:14px;padding:5px 14px">Reset keys</button>
   </div>
 
   <div class="setGroup">
@@ -1759,7 +1818,11 @@ const Sound = (() => {
       tone({ freq: last ? 880 : 620, dur: 0.09, type: 'square', gain: 0.11 });
     },
     serve()  { tone({ freq: 500, to: 760, dur: 0.18, type: 'sine', gain: 0.10 }); },
-    blip()   { tone({ freq: 660, dur: 0.10, type: 'sine', gain: 0.10 }); }
+    blip()   { tone({ freq: 660, dur: 0.10, type: 'sine', gain: 0.10 }); },
+    dashReady() {                    // dash is charged again
+      tone({ freq: 880, dur: 0.07, type: 'sine', gain: 0.05 });
+      tone({ freq: 1320, dur: 0.09, type: 'sine', gain: 0.04, delay: 0.05 });
+    }
   };
 })();
 
@@ -2049,9 +2112,9 @@ const GAME_KEYS = ['KeyW','KeyA','KeyS','KeyD','Space','ShiftLeft','ControlRight
                    'ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter','ShiftRight'];
 addEventListener('keydown', e => {
   keys[e.code] = true;
-  if (GAME_KEYS.includes(e.code)) e.preventDefault();
+  if (GAME_KEYS.includes(e.code) || Object.values(binds).includes(e.code)) e.preventDefault();
   if (state !== 'playing') return;
-  if (e.code === 'ShiftLeft' && !e.repeat) tryDash(online ? myPlayer() : p1);
+  if (e.code === binds.dash && !e.repeat) tryDash(online ? myPlayer() : p1);
   if (mode === '1v1') {
     if (e.code === 'Enter' && p2.onGround) { p2.vy = PLAYER.jump; p2.onGround = false; }
     if (e.code === 'ShiftRight' && !e.repeat) startCharge(p2);
@@ -2293,6 +2356,32 @@ function formatTime(t) {
 }
 
 /* ================= MENU LOGIC ================= */
+/* ---------- Key bindings ---------- */
+/* Player 1 can rebind anything; player 2's local split-screen keys stay fixed. */
+const DEFAULT_BINDS = {
+  forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD',
+  jump: 'Space', dash: 'ShiftLeft'
+};
+const binds = Object.assign({}, DEFAULT_BINDS);
+const BIND_LABELS = {
+  forward: 'Move forward', back: 'Move back', left: 'Strafe left',
+  right: 'Strafe right', jump: 'Jump', dash: 'Dash'
+};
+
+/* Turn a KeyboardEvent code into something readable */
+function keyName(code) {
+  if (!code) return '—';
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Arrow')) return code.slice(5) + ' Arrow';
+  const named = {
+    Space: 'Space', ShiftLeft: 'L Shift', ShiftRight: 'R Shift',
+    ControlLeft: 'L Ctrl', ControlRight: 'R Ctrl', AltLeft: 'L Alt', AltRight: 'R Alt',
+    Enter: 'Enter', Tab: 'Tab', Backquote: '`', CapsLock: 'Caps'
+  };
+  return named[code] || code;
+}
+
 /* ---------- Settings ---------- */
 /* Artifacts can't use browser storage, so settings live for the session only. */
 const settings = {
@@ -2360,10 +2449,13 @@ function openSettings(from) {
   mainMenu.classList.add('hidden');
   pauseMenu.classList.add('hidden');
   syncSettingsUI();
+  refreshBindRows();
+  listeningFor = null;
   settingsMenu.classList.remove('hidden');
 }
 
 function closeSettings() {
+  listeningFor = null;
   settingsMenu.classList.add('hidden');
   if (settingsReturnTo === 'pause') pauseMenu.classList.remove('hidden');
   else mainMenu.classList.remove('hidden');
@@ -2415,12 +2507,91 @@ document.getElementById('statsBtn').addEventListener('click', () => {
 document.querySelectorAll('.qBtn').forEach(b => b.addEventListener('click', () => {
   settings.quality = b.dataset.q; applySettings(); syncSettingsUI();
 }));
+/* ---------- Rebinding ---------- */
+let listeningFor = null;          // which action is waiting for a key
+
+function buildBindRows() {
+  const host = document.getElementById('bindRows');
+  host.innerHTML = '';
+  Object.keys(BIND_LABELS).forEach(action => {
+    const row = document.createElement('div');
+    row.className = 'bindRow';
+    const label = document.createElement('span');
+    label.className = 'bindLabel';
+    label.textContent = BIND_LABELS[action];
+    const btn = document.createElement('button');
+    btn.className = 'bindKey';
+    btn.dataset.action = action;
+    btn.textContent = keyName(binds[action]);
+    btn.addEventListener('click', () => startListening(action, btn));
+    row.appendChild(label);
+    row.appendChild(btn);
+    host.appendChild(row);
+  });
+}
+
+function refreshBindRows() {
+  document.querySelectorAll('.bindKey').forEach(b => {
+    b.textContent = keyName(binds[b.dataset.action]);
+    b.classList.remove('listening', 'clash');
+  });
+  document.getElementById('bindHint').textContent =
+    'Click a key to change it, then press the new one. Esc cancels.';
+}
+
+function startListening(action, btn) {
+  refreshBindRows();
+  listeningFor = action;
+  btn.classList.add('listening');
+  btn.textContent = 'Press a key…';
+  document.getElementById('bindHint').textContent =
+    'Listening for a key for "' + BIND_LABELS[action] + '"… Esc to cancel.';
+}
+
+/* Captured before the game's own key handling so rebinding never triggers actions */
+addEventListener('keydown', e => {
+  if (!listeningFor) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+
+  if (e.code === 'Escape') { listeningFor = null; refreshBindRows(); return; }
+
+  // Taking a key from another action leaves that one unbound, so swap instead
+  const clash = Object.keys(binds).find(a => a !== listeningFor && binds[a] === e.code);
+  if (clash) binds[clash] = binds[listeningFor];
+  binds[listeningFor] = e.code;
+
+  const changed = listeningFor;
+  listeningFor = null;
+  refreshBindRows();
+  refreshControlsHint();
+  if (clash) {
+    document.getElementById('bindHint').textContent =
+      keyName(e.code) + ' was used by "' + BIND_LABELS[clash] + '" — the two have been swapped.';
+  } else {
+    document.getElementById('bindHint').textContent =
+      BIND_LABELS[changed] + ' is now ' + keyName(e.code) + '.';
+  }
+  Sound.blip();
+}, true);
+
+document.getElementById('bindResetBtn').addEventListener('click', () => {
+  Object.assign(binds, DEFAULT_BINDS);
+  refreshBindRows();
+  refreshControlsHint();
+  document.getElementById('bindHint').textContent = 'Keys restored to defaults.';
+});
+
+buildBindRows();
+refreshControlsHint();
+
 document.getElementById('openSettingsBtn').addEventListener('click', () => openSettings('main'));
 document.getElementById('pauseSettingsBtn').addEventListener('click', () => openSettings('pause'));
 document.getElementById('setBackBtn').addEventListener('click', closeSettings);
 document.getElementById('setResetBtn').addEventListener('click', () => {
   Object.assign(settings, DEFAULT_SETTINGS);
-  applySettings(); syncSettingsUI();
+  Object.assign(binds, DEFAULT_BINDS);
+  applySettings(); syncSettingsUI(); refreshBindRows();
 });
 
 ['mousedown', 'keydown', 'touchstart'].forEach(ev =>
@@ -3227,6 +3398,17 @@ applyRemoteSettings = function (sv) {
   if (!isHost) { playerColorIdx[1] = mine; applyColors(); }
 };
 
+function refreshControlsHint() {
+  const el = document.getElementById('controlsHint');
+  if (!el) return;
+  el.innerHTML =
+    '<b>You:</b> Move ' + keyName(binds.forward) + ' ' + keyName(binds.left) + ' ' +
+    keyName(binds.back) + ' ' + keyName(binds.right) +
+    ' | Jump: ' + keyName(binds.jump) + ' | Dash: ' + keyName(binds.dash) +
+    ' | Look: Mouse | Slap: hold Left Click, release<br>' +
+    '<b>Local 1v1 — Player 2:</b> Arrow keys | Jump: Enter | Dash: Right Ctrl | Slap: hold Right Shift';
+}
+
 function refreshFormatUI() {
   const t = document.getElementById('lobbyTitle');
   if (t) t.textContent = isTeamMode() ? '🌐 ONLINE 2v2' : '🌐 ONLINE 1v1';
@@ -3816,12 +3998,12 @@ function updatePlayers(dt) {
     if (menuOpen) {
       movePlayer(mine, '__none', '__none', '__none', '__none', false, dt);
     } else {
-      movePlayer(mine, 'KeyW', 'KeyS', 'KeyD', 'KeyA', keys['Space'], dt);
+      movePlayer(mine, binds.forward, binds.back, binds.right, binds.left, keys[binds.jump], dt);
     }
     return;
   }
 
-  movePlayer(p1, 'KeyW', 'KeyS', 'KeyD', 'KeyA', keys['Space'], dt);
+  movePlayer(p1, binds.forward, binds.back, binds.right, binds.left, keys[binds.jump], dt);
 
   if (mode === '1v1') {
     const eye2 = p2.pos.clone(); eye2.y += PLAYER.height;
@@ -3922,12 +4104,35 @@ function stepGame(dt) {
     // Dash indicators: lightning when ready, countdown while cooling
     [[bar1Player, 'dash1'], [p2, 'dash2']].forEach(([pl, id]) => {
       const el = document.getElementById(id);
-      if (pl.dashCd > 0) {
-        el.textContent = Math.ceil(pl.dashCd);
-        el.classList.add('cooling');
-      } else {
-        el.textContent = '⚡';
+      const fill = el.querySelector('.dashFill');
+      const secs = el.querySelector('.dashSecs');
+      const CIRC = 113;                       // circumference of the r=18 ring
+
+      if (pl.dashTimer > 0) {
+        // Actively dashing: ring full and bright so you can see the burst
         el.classList.remove('cooling');
+        if (fill) fill.style.strokeDashoffset = '0';
+        pl.dashWasReady = false;
+      } else if (pl.dashCd > 0) {
+        // Recharging: the ring fills back up as the cooldown runs down
+        el.classList.add('cooling');
+        el.classList.remove('ready');
+        const progress = 1 - (pl.dashCd / DASH_CD);
+        if (fill) fill.style.strokeDashoffset = String(CIRC * (1 - progress));
+        if (secs) secs.textContent = pl.dashCd.toFixed(1);
+        pl.dashWasReady = false;
+      } else {
+        // Ready — flash once at the moment it recharges
+        el.classList.remove('cooling');
+        if (fill) fill.style.strokeDashoffset = '0';
+        if (!pl.dashWasReady) {
+          pl.dashWasReady = true;
+          el.classList.remove('ready');
+          void el.offsetWidth;               // restart the animation
+          el.classList.add('ready');
+          if (!online || pl === myPlayer()) Sound.dashReady();
+          setTimeout(() => el.classList.remove('ready'), 500);
+        }
       }
     });
 
