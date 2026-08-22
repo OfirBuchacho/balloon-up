@@ -445,6 +445,16 @@
   <div class="setGroup">
     <div class="setTitle">Audio</div>
     <div class="setRow">
+      <span class="setLabel">Master volume</span>
+      <input id="masterSlider" type="range" min="0" max="100" value="80">
+      <span id="masterVal" class="setVal">80</span>
+    </div>
+    <div class="setRow">
+      <span class="setLabel">Music</span>
+      <input id="musicSlider" type="range" min="0" max="100" value="45">
+      <span id="musicVal" class="setVal">45</span>
+    </div>
+    <div class="setRow">
       <span class="setLabel">Sound effects</span>
       <input id="sfxSlider" type="range" min="0" max="100" value="70">
       <span id="sfxVal" class="setVal">70</span>
@@ -1525,14 +1535,22 @@ function fireConfetti() {
 const Sound = (() => {
   let ctx = null, master = null;
 
+  let musicBus = null, musicTimer = null, musicStep = 0;
+
   function ensure() {
     if (ctx) return true;
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return false;
-    ctx = new AC();
+    // 'interactive' asks the browser for the smallest possible output buffer,
+    // which is what removes the lag between a hit and its sound.
+    try { ctx = new AC({ latencyHint: 'interactive' }); }
+    catch (e) { ctx = new AC(); }
     master = ctx.createGain();
     master.gain.value = 0.7;
     master.connect(ctx.destination);
+    musicBus = ctx.createGain();
+    musicBus.gain.value = 0.35;
+    musicBus.connect(ctx.destination);
     return true;
   }
 
@@ -1546,7 +1564,7 @@ const Sound = (() => {
 
   function tone({ freq = 440, to = null, dur = 0.15, type = 'sine', gain = 0.3, delay = 0 }) {
     if (!ensure() || master.gain.value <= 0) return;
-    const t0 = ctx.currentTime + delay;
+    const t0 = ctx.currentTime + delay + 0.001;
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
     osc.type = type;
@@ -1561,7 +1579,7 @@ const Sound = (() => {
 
   function noise({ dur = 0.12, gain = 0.25, freq = 1200, delay = 0 }) {
     if (!ensure() || master.gain.value <= 0) return;
-    const t0 = ctx.currentTime + delay;
+    const t0 = ctx.currentTime + delay + 0.001;
     const len = Math.floor(ctx.sampleRate * dur);
     const buf = ctx.createBuffer(1, len, ctx.sampleRate);
     const data = buf.getChannelData(0);
@@ -1577,8 +1595,92 @@ const Sound = (() => {
     src.start(t0);
   }
 
+  /* ---- Original background music -------------------------------------
+     A bouncy loop written as note data and played with the same synth, so it
+     stays a single self-contained file. Bass line, a bright lead melody and a
+     soft hat on the offbeat, 16 steps per bar at ~104bpm.                      */
+  const BPM = 104;
+  const STEP = 60 / BPM / 4;                     // sixteenth note
+  const N = { C3:130.8, D3:146.8, E3:164.8, F3:174.6, G3:196.0, A3:220.0, Bb3:233.1, B3:246.9,
+              C4:261.6, D4:293.7, E4:329.6, F4:349.2, G4:392.0, A4:440.0, Bb4:466.2, B4:493.9,
+              C5:523.3, D5:587.3, E5:659.3, G5:784.0, A5:880.0 };
+
+  // Four bars, 16 steps each. null = rest.
+  const BASS = [
+    N.C3, null, N.C3, null, N.G3, null, N.C3, null, N.A3, null, N.A3, null, N.E3, null, N.G3, null,
+    N.F3, null, N.F3, null, N.C4, null, N.F3, null, N.G3, null, N.G3, null, N.D4, null, N.B3, null,
+    N.C3, null, N.C3, null, N.G3, null, N.C3, null, N.A3, null, N.C4, null, N.E3, null, N.G3, null,
+    N.F3, null, N.A3, null, N.C4, null, N.G3, null, N.G3, null, N.B3, null, N.D4, null, N.G3, null
+  ];
+  const LEAD = [
+    N.C5, null, N.E5, N.G5, null, N.E5, null, N.D5, null, N.C5, null, null, N.A4, null, N.G4, null,
+    N.F4, null, N.A4, N.C5, null, N.A4, null, N.G4, null, N.B4, null, null, N.D5, null, N.B4, null,
+    N.C5, null, N.E5, N.G5, null, N.A5, null, N.G5, null, N.E5, null, N.C5, null, N.D5, null, null,
+    N.F4, N.G4, N.A4, null, N.B4, null, N.D5, null, N.C5, null, null, null, null, null, null, null
+  ];
+
+  function playMusicStep() {
+    if (!ctx || !musicBus || musicBus.gain.value <= 0) return;
+    const i = musicStep % BASS.length;
+
+    const bass = BASS[i];
+    if (bass) {
+      const t0 = ctx.currentTime + 0.001;
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(bass, t0);
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.22, t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0005, t0 + STEP * 1.7);
+      o.connect(g); g.connect(musicBus);
+      o.start(t0); o.stop(t0 + STEP * 1.8);
+    }
+
+    const lead = LEAD[i];
+    if (lead) {
+      const t0 = ctx.currentTime + 0.001;
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'square';
+      o.frequency.setValueAtTime(lead, t0);
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.085, t0 + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0005, t0 + STEP * 1.4);
+      o.connect(g); g.connect(musicBus);
+      o.start(t0); o.stop(t0 + STEP * 1.5);
+    }
+
+    if (i % 4 === 2) {                            // soft hat on the offbeat
+      const t0 = ctx.currentTime + 0.001;
+      const len = Math.floor(ctx.sampleRate * 0.03);
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const dta = buf.getChannelData(0);
+      for (let k = 0; k < len; k++) dta[k] = (Math.random() * 2 - 1) * (1 - k / len);
+      const src = ctx.createBufferSource(); src.buffer = buf;
+      const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 6000;
+      const g = ctx.createGain(); g.gain.value = 0.05;
+      src.connect(f); f.connect(g); g.connect(musicBus);
+      src.start(t0);
+    }
+
+    musicStep++;
+  }
+
+  function startMusic() {
+    if (!ensure() || musicTimer) return;
+    musicStep = 0;
+    musicTimer = setInterval(playMusicStep, STEP * 1000);
+  }
+  function stopMusic() {
+    if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+  }
+  function setMusicVolume(v) {
+    if (!ensure()) return;
+    musicBus.gain.value = Math.max(0, Math.min(1, v)) * 0.5;
+  }
+
   return {
-    unlock, setVolume,
+    unlock, setVolume, startMusic, stopMusic, setMusicVolume,
+    get musicPlaying() { return !!musicTimer; },
     // A slap is a short airy thump — harder hits are lower and louder
     slap(power) {
       const p = Math.max(0.4, Math.min(2.1, power));
@@ -1609,7 +1711,8 @@ const Sound = (() => {
     tick(last) {                     // countdown in the final seconds
       tone({ freq: last ? 880 : 620, dur: 0.09, type: 'square', gain: 0.11 });
     },
-    serve()  { tone({ freq: 500, to: 760, dur: 0.18, type: 'sine', gain: 0.10 }); }
+    serve()  { tone({ freq: 500, to: 760, dur: 0.18, type: 'sine', gain: 0.10 }); },
+    blip()   { tone({ freq: 660, dur: 0.10, type: 'sine', gain: 0.10 }); }
   };
 })();
 
@@ -1976,6 +2079,11 @@ function releaseSlap(pl, cam) {
     if (toBalloon.normalize().dot(dir) < 0.55) return;
     pl.slapTimer = SLAP_COOLDOWN;
     pl.punchAnim = PUNCH_TIME;
+    // Feedback fires here, locally. Waiting for the server echo was the delay,
+    // and it never played at all when the echo was filtered out.
+    spawnImpact(balloon.position, power);
+    addShake(0.10 + power * 0.09);
+    Sound.slap(power);
     registerTouch(myNum);      // optimistic: the host confirms with its next packet
     socket.emit('event', { t: 'slapReq', power, dx: dir.x, dy: dir.y, dz: dir.z, by: myNum });
 
@@ -2027,6 +2135,11 @@ function releaseSlap(pl, cam) {
   impulse.x += (Math.random()-0.5) * 2.2;
   impulse.z += (Math.random()-0.5) * 2.2;
   balloonVel.add(impulse);
+
+  // Immediate local feedback for every successful hit, in every mode
+  spawnImpact(balloon.position, power);
+  addShake(0.10 + power * 0.09);
+  Sound.slap(power);
 
   balloonAngVel.x += (Math.random()-0.5) * 6 * power;
   balloonAngVel.y += (Math.random()-0.5) * 6 * power;
@@ -2139,6 +2252,8 @@ const settings = {
   sensitivity: 1.0,
   invertY: false,
   fov: 74,
+  master: 80,
+  music: 45,
   sfx: 70,
   shadows: true,
   showStats: false,
@@ -2157,7 +2272,11 @@ function applySettings() {
   renderer.setPixelRatio(settings.quality === 'high'
     ? Math.min(devicePixelRatio, 2) : 1);
 
-  Sound.setVolume(settings.sfx / 100);
+  const m = settings.master / 100;
+  Sound.setVolume((settings.sfx / 100) * m);
+  Sound.setMusicVolume((settings.music / 100) * m);
+  if (settings.music > 0 && settings.master > 0) Sound.startMusic();
+  else Sound.stopMusic();
   netDebug.on = settings.showStats;
   netDebugEl.style.display = settings.showStats ? 'block' : 'none';
 }
@@ -2169,6 +2288,10 @@ function syncSettingsUI() {
   document.getElementById('fovVal').textContent = settings.fov;
   document.getElementById('sfxSlider').value = settings.sfx;
   document.getElementById('sfxVal').textContent = settings.sfx;
+  document.getElementById('masterSlider').value = settings.master;
+  document.getElementById('masterVal').textContent = settings.master;
+  document.getElementById('musicSlider').value = settings.music;
+  document.getElementById('musicVal').textContent = settings.music;
   const inv = document.getElementById('invertBtn');
   inv.textContent = settings.invertY ? 'ON' : 'OFF';
   inv.classList.toggle('on', settings.invertY);
@@ -2208,11 +2331,30 @@ document.getElementById('fovSlider').addEventListener('input', e => {
   document.getElementById('fovVal').textContent = settings.fov;
   applySettings();
 });
+/* One gentle blip once the slider settles — previewing on every tick while
+   dragging was genuinely painful to listen to. */
+let previewTimer = null;
+function schedulePreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(() => { Sound.blip(); }, 260);
+}
+
 document.getElementById('sfxSlider').addEventListener('input', e => {
   settings.sfx = parseInt(e.target.value, 10);
   document.getElementById('sfxVal').textContent = settings.sfx;
-  Sound.setVolume(settings.sfx / 100);
-  Sound.slap(1.0);                       // preview so the level is audible
+  applySettings();
+  schedulePreview();
+});
+document.getElementById('masterSlider').addEventListener('input', e => {
+  settings.master = parseInt(e.target.value, 10);
+  document.getElementById('masterVal').textContent = settings.master;
+  applySettings();
+  schedulePreview();
+});
+document.getElementById('musicSlider').addEventListener('input', e => {
+  settings.music = parseInt(e.target.value, 10);
+  document.getElementById('musicVal').textContent = settings.music;
+  applySettings();
 });
 document.getElementById('invertBtn').addEventListener('click', () => {
   settings.invertY = !settings.invertY; syncSettingsUI();
@@ -2235,7 +2377,13 @@ document.getElementById('setResetBtn').addEventListener('click', () => {
 });
 
 ['mousedown', 'keydown', 'touchstart'].forEach(ev =>
-  addEventListener(ev, () => Sound.unlock(), { once: false, passive: true }));
+  addEventListener(ev, () => {
+    Sound.unlock();
+    if (settings.music > 0 && settings.master > 0 && !Sound.musicPlaying) {
+      Sound.setMusicVolume((settings.music / 100) * (settings.master / 100));
+      Sound.startMusic();
+    }
+  }, { once: false, passive: true }));
 
 /* ---------- Map selection + loading screen ---------- */
 let mapChoice = 'random';        // what the host picked ('random' or a map key)
@@ -2862,8 +3010,9 @@ function connectSocket() {
   /* Game events */
   socket.on('event', d => {
     if (d.t === 'slapAnim') {
+      if (d.by === myNum) return;              // mine already played, don't double it
       const rp = playerByNum(d.by) || ((myNum === 1) ? p2 : p1);
-      if (rp && rp.num !== myNum) rp.punchAnim = PUNCH_TIME;
+      if (rp) rp.punchAnim = PUNCH_TIME;
       spawnImpact(balloon.position, d.power || 1.2);
       Sound.slap(d.power || 1.2);
     } else if (d.t === 'slapReq' && isHost) {
