@@ -220,6 +220,15 @@
   .pill.toggle { min-width: 78px; font-size: 15px; padding: 6px 16px; }
   .pill.toggle.on { background: #ffd166; color: #222; border-color: #ffd166; font-weight: 700; }
   .qBtn { font-size: 15px; padding: 6px 16px; }
+  #confetti { position: fixed; inset: 0; z-index: 11; pointer-events: none; overflow: hidden; }
+  #confetti i {
+    position: absolute; top: -20px; width: 9px; height: 15px; opacity: 0.95;
+    animation: confettiFall linear forwards;
+  }
+  @keyframes confettiFall {
+    0%   { transform: translateY(-20px) rotate(0deg); }
+    100% { transform: translateY(105vh) rotate(720deg); }
+  }
   #netMsg {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); z-index: 9;
     background: rgba(20,20,30,0.85); color: #ffd166; font-size: 22px; font-weight: 700;
@@ -493,6 +502,7 @@
     </div>
   </div>
 </div>
+<div id="confetti" class="hidden"></div>
 <div id="netMsg"></div>
 <div id="clickToPlay" class="hidden">
   <div class="ctpBox">
@@ -532,6 +542,7 @@ const GRAVITY_PLAYER = -14;
 const SLAP_RANGE = 2.7;
 const SLAP_POWER = 6.2;
 const SLAP_COOLDOWN = 0.45;
+const PUNCH_TIME = 0.26;      // how long the swing animation runs
 const WIN_SCORE = 5;
 const CHARGE_TIME = 1.1;
 const POWER_MIN = 0.55;
@@ -1490,6 +1501,199 @@ function pickMapKey(choice) {
 
 buildMap('living');       // the world exists from load; matches rebuild it as needed
 
+/* ================= CONFETTI ================= */
+function fireConfetti() {
+  const layer = document.getElementById('confetti');
+  if (!layer) return;
+  layer.innerHTML = '';
+  layer.classList.remove('hidden');
+  const colours = ['#ffd166', '#ff6b6b', '#6bb3ff', '#9be29b', '#d45d9e', '#ffb36b'];
+  for (let i = 0; i < 90; i++) {
+    const bit = document.createElement('i');
+    bit.style.left = Math.random() * 100 + 'vw';
+    bit.style.background = colours[i % colours.length];
+    bit.style.animationDelay = (Math.random() * 0.9) + 's';
+    bit.style.animationDuration = (2.2 + Math.random() * 1.8) + 's';
+    bit.style.transform = 'rotate(' + Math.random() * 360 + 'deg)';
+    layer.appendChild(bit);
+  }
+  setTimeout(() => layer.classList.add('hidden'), 4800);
+}
+
+/* ================= SOUND ================= */
+/* Everything is synthesised in the browser — no audio files to load or host. */
+const Sound = (() => {
+  let ctx = null, master = null;
+
+  function ensure() {
+    if (ctx) return true;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    ctx = new AC();
+    master = ctx.createGain();
+    master.gain.value = 0.7;
+    master.connect(ctx.destination);
+    return true;
+  }
+
+  // Browsers require a user gesture before audio starts
+  function unlock() {
+    if (!ensure()) return;
+    if (ctx.state === 'suspended') ctx.resume();
+  }
+
+  function setVolume(v) { if (master) master.gain.value = Math.max(0, Math.min(1, v)); }
+
+  function tone({ freq = 440, to = null, dur = 0.15, type = 'sine', gain = 0.3, delay = 0 }) {
+    if (!ensure() || master.gain.value <= 0) return;
+    const t0 = ctx.currentTime + delay;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t0);
+    if (to) osc.frequency.exponentialRampToValueAtTime(Math.max(1, to), t0 + dur);
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(gain, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0005, t0 + dur);
+    osc.connect(g); g.connect(master);
+    osc.start(t0); osc.stop(t0 + dur + 0.02);
+  }
+
+  function noise({ dur = 0.12, gain = 0.25, freq = 1200, delay = 0 }) {
+    if (!ensure() || master.gain.value <= 0) return;
+    const t0 = ctx.currentTime + delay;
+    const len = Math.floor(ctx.sampleRate * dur);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = freq;
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    src.connect(filter); filter.connect(g); g.connect(master);
+    src.start(t0);
+  }
+
+  return {
+    unlock, setVolume,
+    // A slap is a short airy thump — harder hits are lower and louder
+    slap(power) {
+      const p = Math.max(0.4, Math.min(2.1, power));
+      noise({ dur: 0.09, gain: 0.12 + p * 0.09, freq: 1800 - p * 500 });
+      tone({ freq: 260 - p * 60, to: 90, dur: 0.13, type: 'triangle', gain: 0.10 + p * 0.05 });
+    },
+    charge() { tone({ freq: 220, to: 520, dur: 0.5, type: 'sine', gain: 0.05 }); },
+    bounce() { noise({ dur: 0.06, gain: 0.08, freq: 900 }); },
+    jump()   { tone({ freq: 320, to: 520, dur: 0.09, type: 'sine', gain: 0.07 }); },
+    land()   { noise({ dur: 0.07, gain: 0.09, freq: 400 }); },
+    dash()   { noise({ dur: 0.18, gain: 0.10, freq: 2600 }); },
+    floor()  {                       // the balloon hits the ground
+      noise({ dur: 0.16, gain: 0.2, freq: 500 });
+      tone({ freq: 180, to: 60, dur: 0.25, type: 'sine', gain: 0.16 });
+    },
+    point()  {                       // someone scored
+      tone({ freq: 660, dur: 0.12, type: 'square', gain: 0.12 });
+      tone({ freq: 880, dur: 0.16, type: 'square', gain: 0.12, delay: 0.11 });
+    },
+    win() {
+      [523, 659, 784, 1047].forEach((f, i) =>
+        tone({ freq: f, dur: 0.30, type: 'triangle', gain: 0.16, delay: i * 0.13 }));
+    },
+    lose() {
+      [440, 370, 294].forEach((f, i) =>
+        tone({ freq: f, dur: 0.28, type: 'triangle', gain: 0.14, delay: i * 0.14 }));
+    },
+    tick(last) {                     // countdown in the final seconds
+      tone({ freq: last ? 880 : 620, dur: 0.09, type: 'square', gain: 0.11 });
+    },
+    serve()  { tone({ freq: 500, to: 760, dur: 0.18, type: 'sine', gain: 0.10 }); }
+  };
+})();
+
+/* ================= IMPACT EFFECTS ================= */
+/* A pool of expanding rings, reused so we never allocate mid-rally */
+const rings = [];
+for (let i = 0; i < 6; i++) {
+  const m = new THREE.Mesh(
+    new THREE.RingGeometry(0.35, 0.5, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, side: THREE.DoubleSide })
+  );
+  m.visible = false;
+  scene.add(m);
+  rings.push({ mesh: m, life: 0, max: 0.42, power: 1 });
+}
+
+function spawnImpact(pos, power) {
+  const r = rings.find(x => x.life <= 0) || rings[0];
+  r.mesh.position.copy(pos);
+  r.mesh.visible = true;
+  r.life = r.max;
+  r.power = power;
+  r.mesh.material.color.setHex(power > 1.4 ? 0xffd166 : 0xffffff);
+}
+
+function updateImpacts(dt) {
+  rings.forEach(r => {
+    if (r.life <= 0) return;
+    r.life -= dt;
+    const t = 1 - r.life / r.max;                   // 0 -> 1
+    const size = 0.6 + t * (2.2 + r.power * 1.6);
+    r.mesh.scale.set(size, size, size);
+    r.mesh.material.opacity = (1 - t) * 0.75;
+    if (camera1) r.mesh.quaternion.copy(camera1.quaternion);   // always face the viewer
+    if (r.life <= 0) r.mesh.visible = false;
+  });
+}
+
+/* Screen shake — scaled by how hard the hit was */
+let shake = 0;
+function addShake(amount) { shake = Math.min(0.5, shake + amount); }
+function applyShake(cam, dt) {
+  if (shake <= 0) return;
+  shake = Math.max(0, shake - dt * 1.8);
+  const k = shake * shake;                          // falls off fast
+  cam.position.x += (Math.random() - 0.5) * k * 0.9;
+  cam.position.y += (Math.random() - 0.5) * k * 0.9;
+  cam.rotation.z += (Math.random() - 0.5) * k * 0.25;
+}
+
+/* Trail: faint copies of the balloon left behind when it's moving fast */
+const trail = [];
+for (let i = 0; i < 10; i++) {
+  const m = new THREE.Mesh(
+    new THREE.SphereGeometry(0.5, 12, 10),
+    new THREE.MeshBasicMaterial({ color: 0xe63946, transparent: true, opacity: 0 })
+  );
+  m.visible = false;
+  scene.add(m);
+  trail.push({ mesh: m, life: 0 });
+}
+let trailTimer = 0;
+
+function updateTrail(dt, speed, pos) {
+  trailTimer -= dt;
+  if (speed > 7 && trailTimer <= 0) {
+    const t = trail.find(x => x.life <= 0);
+    if (t) {
+      t.mesh.position.copy(pos);
+      t.mesh.visible = true;
+      t.life = 0.3;
+    }
+    trailTimer = 0.03;
+  }
+  trail.forEach(t => {
+    if (t.life <= 0) return;
+    t.life -= dt;
+    const k = Math.max(0, t.life / 0.3);
+    t.mesh.material.opacity = k * 0.35;
+    t.mesh.scale.setScalar(0.75 + (1 - k) * 0.35);
+    if (t.life <= 0) t.mesh.visible = false;
+  });
+}
+
 /* ================= BALLOON ================= */
 const balloonMat = new THREE.MeshStandardMaterial({
   color: 0xe63946, roughness: 0.25, metalness: 0.05, emissive: 0x330000
@@ -1526,6 +1730,7 @@ function otherTeam(t) { return t === 1 ? 2 : 1; }
 function isTeamMode() { return matchMode === '2v2'; }
 let restTimer = 0;       // how long the balloon has been parked on furniture
 let strandedFor = 0;     // how long the balloon has been parked out of play
+let lastTickSec = -1;    // so the countdown beeps once per second
 let strandedAnchor = null;  // where it was when it stopped going anywhere
 let restPerchY = 0;      // height of the surface it's parked on (0 = not parked)
 const REST_GRACE = 2.5;  // seconds a parked balloon is left alone so players can reach it
@@ -1571,6 +1776,7 @@ function updateBalloonRemote(dt) {
 }
 
 function resetBalloon() {
+  if (typeof Sound !== 'undefined') Sound.serve();
   balloon.position.set(0, 5.5, 0.5);
   balloonVel.set((Math.random()-0.5)*1.2, 0.3, (Math.random()-0.5)*1.2);
   balloonAngVel.set(0, 0, 0);
@@ -1615,10 +1821,12 @@ function makeBody(color) {
   // Torso (shirt)
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.52, 0.24), shirt);
   torso.position.y = 0.98; torso.castShadow = true; g.add(torso);
+  g.userData.torso = torso;
 
   // Head + simple face
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.175, 20, 16), skin);
   head.position.y = 1.42; head.castShadow = true; g.add(head);
+  g.userData.head = head;
   // Clean faceless look — hair only
   // Simple hair cap
   const hair = new THREE.Mesh(new THREE.SphereGeometry(0.178, 18, 12, 0, Math.PI*2, 0, Math.PI*0.55), 
@@ -1680,6 +1888,7 @@ function playerByNum(n) { return players[n - 1]; }
 
 function tryDash(pl) {
   if (pl.dashCd > 0) return;
+  if (!online || pl === myPlayer()) Sound.dash();
   pl.dashTimer = DASH_TIME;
   pl.dashCd = DASH_CD;
 }
@@ -1766,7 +1975,7 @@ function releaseSlap(pl, cam) {
     if (toBalloon.length() > SLAP_RANGE) return;
     if (toBalloon.normalize().dot(dir) < 0.55) return;
     pl.slapTimer = SLAP_COOLDOWN;
-    pl.punchAnim = 0.18;
+    pl.punchAnim = PUNCH_TIME;
     registerTouch(myNum);      // optimistic: the host confirms with its next packet
     socket.emit('event', { t: 'slapReq', power, dx: dir.x, dy: dir.y, dz: dir.z, by: myNum });
 
@@ -1808,7 +2017,7 @@ function releaseSlap(pl, cam) {
     return;
   }
   if (isDuel() && lastToucher === selfId) {
-    pl.punchAnim = 0.18;
+    pl.punchAnim = PUNCH_TIME;
     pointScored(selfId === 1 ? 2 : 1, 'Double touch by Player ' + selfId + '! Point for Player ' + (selfId === 1 ? 2 : 1));
     return;
   }
@@ -1826,9 +2035,9 @@ function releaseSlap(pl, cam) {
   lastToucher = selfId;
   lastTouchTime = performance.now();
   updateTurnUI();
-  if (online && socket) socket.emit('event', { t: 'slapAnim' });
+  if (online && socket) socket.emit('event', { t: 'slapAnim', by: selfId, power });
   if (mode === 'free') { fpHits++; hitsEl.textContent = fpHits; }
-  pl.punchAnim = 0.18;
+  pl.punchAnim = PUNCH_TIME;
 }
 
 /* The rulebook for a slap. Returns null when it's legal, or a foul description.
@@ -1864,7 +2073,7 @@ function registerTouch(byNum) {
 /* Host applies a slap requested by the remote guest */
 function applyRemoteSlap(d) {
   const pl = playerByNum(d.by) || p2;
-  pl.punchAnim = 0.18;
+  pl.punchAnim = PUNCH_TIME;
 
   const foul = checkSlapLegality(d.by);
   if (foul) {
@@ -1948,6 +2157,7 @@ function applySettings() {
   renderer.setPixelRatio(settings.quality === 'high'
     ? Math.min(devicePixelRatio, 2) : 1);
 
+  Sound.setVolume(settings.sfx / 100);
   netDebug.on = settings.showStats;
   netDebugEl.style.display = settings.showStats ? 'block' : 'none';
 }
@@ -2001,6 +2211,8 @@ document.getElementById('fovSlider').addEventListener('input', e => {
 document.getElementById('sfxSlider').addEventListener('input', e => {
   settings.sfx = parseInt(e.target.value, 10);
   document.getElementById('sfxVal').textContent = settings.sfx;
+  Sound.setVolume(settings.sfx / 100);
+  Sound.slap(1.0);                       // preview so the level is audible
 });
 document.getElementById('invertBtn').addEventListener('click', () => {
   settings.invertY = !settings.invertY; syncSettingsUI();
@@ -2021,6 +2233,9 @@ document.getElementById('setResetBtn').addEventListener('click', () => {
   Object.assign(settings, DEFAULT_SETTINGS);
   applySettings(); syncSettingsUI();
 });
+
+['mousedown', 'keydown', 'touchstart'].forEach(ev =>
+  addEventListener(ev, () => Sound.unlock(), { once: false, passive: true }));
 
 /* ---------- Map selection + loading screen ---------- */
 let mapChoice = 'random';        // what the host picked ('random' or a map key)
@@ -2416,6 +2631,7 @@ function startNewMatch() {
   score1El.textContent = '0';
   score2El.textContent = '0';
   timeLeft = matchTime;
+  lastTickSec = -1;
   suddenDeath = false;
   timerEl.textContent = formatTime(matchTime);
   timerEl.classList.remove('low');
@@ -2647,7 +2863,9 @@ function connectSocket() {
   socket.on('event', d => {
     if (d.t === 'slapAnim') {
       const rp = playerByNum(d.by) || ((myNum === 1) ? p2 : p1);
-      if (rp && rp.num !== myNum) rp.punchAnim = 0.18;
+      if (rp && rp.num !== myNum) rp.punchAnim = PUNCH_TIME;
+      spawnImpact(balloon.position, d.power || 1.2);
+      Sound.slap(d.power || 1.2);
     } else if (d.t === 'slapReq' && isHost) {
       applyRemoteSlap(d);
     } else if (d.t === 'guestColor' && isHost) {
@@ -2945,6 +3163,10 @@ function netTick(dt) {
 }
 /* ================= SCORING ================= */
 function finishMatch() {
+  const iWon = online ? ((myNum % 2 === 1 ? 1 : 2) === (score1 > score2 ? 1 : 2))
+                      : true;
+  if (iWon) Sound.win(); else Sound.lose();
+  fireConfetti();
   const winner = score1 > score2 ? 1 : 2;
   const c = PALETTE[playerColorIdx[winner-1]].name;
   const title = '🏆';
@@ -2972,6 +3194,8 @@ function pointScored(byPlayer, customMsg) {
   roundMsgEl.textContent = msg;
   roundMsgEl.style.display = 'block';
   roundPause = 1.6;
+  Sound.point();
+  addShake(0.16);
   if (online && isHost && socket) socket.emit('event', { t: 'score', s1: score1, s2: score2, msg });
 }
 
@@ -3000,6 +3224,7 @@ function collideBalloonWithBox(box) {
     const n = delta.clone().normalize();
     p.addScaledVector(n, BALLOON_R - dist);
     const vn = balloonVel.dot(n);
+    if (vn < -2.5) Sound.bounce();
     if (vn < 0) balloonVel.addScaledVector(n, -vn * 1.55);
     const tangent = balloonVel.clone().sub(n.clone().multiplyScalar(balloonVel.dot(n)));
     balloonAngVel.add(new THREE.Vector3().crossVectors(n, tangent).multiplyScalar(1.2));
@@ -3255,6 +3480,8 @@ function updateBalloon(dt) {
   const liveForScoring = (state === 'playing') || (online && state === 'paused');
   if (balloon.position.y < r*1.12 && roundPause <= 0 && liveForScoring) {
     balloon.position.y = r*1.12;
+    spawnImpact(balloon.position, 1.0);
+    Sound.floor();
 
     if (mode === 'free') {
       if (state !== 'playing') return;
@@ -3356,6 +3583,7 @@ function movePlayer(pl, fwdKey, backKey, rightKey, leftKey, jumpHeld, dt) {
   if (jumpHeld && pl.onGround) {
     pl.vy = PLAYER.jump;
     pl.onGround = false;
+    if (!online || pl === myPlayer()) Sound.jump();
   }
 
   pl.vy += GRAVITY_PLAYER * dt;
@@ -3411,10 +3639,11 @@ function setCamera(cam, pl) {
   cam.rotation.order = 'YXZ';
   cam.rotation.y = pl.yaw;
   cam.rotation.x = pl.pitch;
+  applyShake(cam, 1/60);
   if (pl.punchAnim > 0) {
     const f = new THREE.Vector3();
     cam.getWorldDirection(f);
-    cam.position.addScaledVector(f, Math.sin(pl.punchAnim/0.18*Math.PI) * 0.07);
+    cam.position.addScaledVector(f, Math.sin(pl.punchAnim/PUNCH_TIME*Math.PI) * 0.07);
   }
 }
 
@@ -3472,6 +3701,14 @@ function stepGame(dt) {
     }
 
     netTick(dt);
+    updateImpacts(dt);
+    updateTrail(dt, balloonVel.length(), balloon.position);
+
+    // Countdown beeps in the last five seconds
+    if (isDuel() && !suddenDeath && timeLeft > 0) {
+      const sec = Math.ceil(timeLeft);
+      if (sec <= 5 && sec !== lastTickSec) { lastTickSec = sec; Sound.tick(sec <= 1); }
+    }
 
     players.forEach(pl => { if (pl.punchAnim > 0) pl.punchAnim -= dt; });
 
@@ -3504,12 +3741,36 @@ function stepGame(dt) {
       ud.legR.rotation.x += (-sw - ud.legR.rotation.x) * ease;
       ud.armL.rotation.x += (-sw * 0.7 - ud.armL.rotation.x) * ease;
       const arm = ud.armR;
+      const torso = ud.torso, head = ud.head;
       if (pl.punchAnim > 0) {
-        arm.rotation.x = 2.4 - (1 - pl.punchAnim/0.18) * 3.4;
+        /* Whip through the swing rather than moving at a constant rate: fast at
+           the start, easing out into a follow-through. */
+        const t = 1 - pl.punchAnim / PUNCH_TIME;          // 0 -> 1 through the swing
+        const whip = 1 - Math.pow(1 - t, 3);
+        arm.rotation.x = 2.4 - whip * 3.9;                 // over the shoulder, down past the hip
+        arm.rotation.z = -0.5 * Math.sin(t * Math.PI);     // slight outward arc
+        if (torso) {
+          torso.rotation.y = -0.55 * Math.sin(t * Math.PI);   // shoulders drive the hit
+          torso.rotation.x = 0.22 * Math.sin(t * Math.PI);    // lean into it
+        }
+        if (head) head.rotation.y = -0.3 * Math.sin(t * Math.PI);
       } else if (pl.charging) {
-        arm.rotation.x = 1.6 + pl.charge * 0.9;
+        // Coil up: arm back and rising, body turning away, ready to uncoil
+        arm.rotation.x = 1.6 + pl.charge * 1.1;
+        arm.rotation.z = 0.25 * pl.charge;
+        if (torso) {
+          torso.rotation.y = 0.45 * pl.charge;
+          torso.rotation.x = -0.12 * pl.charge;
+        }
+        if (head) head.rotation.y = 0.2 * pl.charge;
       } else {
         arm.rotation.x += (sw * 0.7 - arm.rotation.x) * ease;
+        arm.rotation.z += (0 - arm.rotation.z) * ease;
+        if (torso) {
+          torso.rotation.y += (0 - torso.rotation.y) * ease;
+          torso.rotation.x += (0 - torso.rotation.x) * ease;
+        }
+        if (head) head.rotation.y += (0 - head.rotation.y) * ease;
       }
     }
   }
